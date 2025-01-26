@@ -13,7 +13,7 @@ use std::{
     thread,
     time::Duration,
 };
-use wg_2024::{network::*, packet::*};
+use wg_2024::{config::Server, network::*, packet::*};
 
 
 const STRINGBIT: u8 = 1;
@@ -25,6 +25,8 @@ const TEXTBIT: u8 = 6;
 const CHATSTRINGBIT: u8 = 7;
 const CHATIMAGEBIT: u8 = 8;
 const CHATAUDIOBIT: u8 = 9;
+const DEFRESPONSEBIT: u8 = 10;
+const CONTENTRESPONSEBIT: u8 = 11;
 
 ///TODO::
 /// -Specific comments on what the code does
@@ -69,6 +71,29 @@ fn check_wholeness(fragments: &mut Vec<Fragment>) -> bool {
     check_count == count // Verify completeness
 }
 
+fn split_on_one(input: Vec<u8>) -> Vec<Vec<u8>> {
+    let mut result = Vec::new();
+    let mut current_chunk = Vec::new();
+
+    for &byte in &input {
+        if byte == 1 {
+            // If current_chunk is not empty, push it to the result
+            if !current_chunk.is_empty() {
+                result.push(current_chunk);
+                current_chunk = Vec::new();
+            }
+        }
+        // Always add the byte to the current chunk
+        current_chunk.push(byte);
+    }
+
+    // Push the last chunk if it's not empty
+    if !current_chunk.is_empty() {
+        result.push(current_chunk);
+    }
+
+    result
+}
 // Trait to assemble fragments into the original message
 pub trait Assembler<T: Fragmentation<T>> {
     fn assemble(fragments: &mut Vec<Fragment>) -> Result<T, String>;
@@ -186,12 +211,9 @@ impl Assembler<image::DynamicImage> for image::DynamicImage {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum DefaultsRequest {
-    LOGIN,            //client logs to chat server
     REGISTER,         //client register to chat server
     GETALLTEXT,       //request all text file inside of content server
     GETALLMEDIALINKS, //request all media links insede of content server
-    SETUNAVAILABLE,   //set client unavailable for chatting inside of chat server
-    SETAVAILABLE,     //set client available for chatting inside of chat server
     GETALLAVAILABLE,  //get all client available for chatting
     GETSERVERTYPE,
     GETCLIENTTYPE,
@@ -200,9 +222,7 @@ pub enum DefaultsRequest {
 impl Fragmentation<DefaultsRequest> for DefaultsRequest {
     fn fragment(message: DefaultsRequest) -> Vec<u8> {
         match message {
-            DefaultsRequest::LOGIN => {
-                vec![DEFAULTBIT, 0]
-            }
+            
             DefaultsRequest::REGISTER => {
                 vec![DEFAULTBIT, 1]
             }
@@ -214,18 +234,12 @@ impl Fragmentation<DefaultsRequest> for DefaultsRequest {
             }
             DefaultsRequest::GETALLAVAILABLE => {
                 vec![DEFAULTBIT, 4]
-            }
-            DefaultsRequest::SETAVAILABLE => {
-                vec![DEFAULTBIT, 5]
-            }
-            DefaultsRequest::SETUNAVAILABLE => {
-                vec![DEFAULTBIT, 6]
             },
             DefaultsRequest::GETCLIENTTYPE => {
-                vec![DEFAULTBIT,7]
+                vec![DEFAULTBIT,5]
             },
             DefaultsRequest::GETSERVERTYPE => {
-                vec![DEFAULTBIT,8]
+                vec![DEFAULTBIT,6]
             }
         }
     }
@@ -238,15 +252,12 @@ impl Assembler<DefaultsRequest> for DefaultsRequest {
         } else {
             //match the second fragment first bit for recognition.
             match fragments[1].data[0] {
-                0 => Ok(DefaultsRequest::LOGIN),
                 1 => Ok(DefaultsRequest::REGISTER),
                 2 => Ok(DefaultsRequest::GETALLTEXT),
                 3 => Ok(DefaultsRequest::GETALLMEDIALINKS),
                 4 => Ok(DefaultsRequest::GETALLAVAILABLE),
-                5 => Ok(DefaultsRequest::SETAVAILABLE),
-                6 => Ok(DefaultsRequest::SETUNAVAILABLE),
-                7 => Ok(DefaultsRequest::GETCLIENTTYPE),
-                8 => Ok(DefaultsRequest::GETSERVERTYPE),
+                5 => Ok(DefaultsRequest::GETCLIENTTYPE),
+                6 => Ok(DefaultsRequest::GETSERVERTYPE),
                 _ => Err("Default request identifier does not match".to_string()),
             }
         }
@@ -305,6 +316,8 @@ impl Assembler<ContentRequest> for ContentRequest {
         }
     }
 }
+
+#[derive(Debug,Clone)]
 
 pub enum ChatMessages {
     CHATSTRING(NodeId, NodeId, String), //send to specific client to simulate chat behaviour
@@ -412,7 +425,350 @@ impl Assembler<ChatMessages> for ChatMessages {
     }
 }
 
+#[derive(Debug,Clone)]
+pub enum DefaultResponse {
+    REGISTERED(bool),
+    ALLTEXT(Vec<String>),
+    ALLMEDIALINKS(Vec<String>),
+    ALLAVAILABLE(Vec<NodeId>),
+    SERVERTYPE(u8), //1: textServer, 2: mediaServer, 3: chatServer
+    ERRNOTEXT,
+    ERRNOMEDIA,
+    ERRNOAVAILABLE,
+}
 
+impl Fragmentation<DefaultResponse> for DefaultResponse {
+    fn fragment(message: DefaultResponse) -> Vec<u8> {
+        let mut vec = [DEFRESPONSEBIT].to_vec();
+
+        match message {
+            DefaultResponse::REGISTERED(val)=>{
+                let mut bit = 0;
+                if val {
+                    bit=1;
+                }
+                let mut vec_1 = [0,bit].to_vec();
+                vec.append(&mut vec_1);
+                vec
+            },
+            DefaultResponse::ALLTEXT(links)=>{
+                vec.push(1);
+                for l in links {
+                    let mut bytes = <String as Fragmentation<String>>::fragment(l); 
+                    vec.append(&mut bytes);
+                }
+                vec
+            }
+            DefaultResponse::ALLMEDIALINKS(links)=>{
+                vec.push(2);
+                for l in links {
+                    let mut bytes = <String as Fragmentation<String>>::fragment(l); 
+                    vec.append(&mut bytes);
+                }
+                vec
+            },
+            DefaultResponse::ALLAVAILABLE(ids) =>{
+                vec.push(3);
+                for id in ids {
+                    vec.push(id);
+                }
+                vec
+            },
+            DefaultResponse::SERVERTYPE(typ) => {
+                vec.push(4);
+                vec.push(typ);
+                vec
+            },
+            DefaultResponse::ERRNOTEXT => {
+                vec.push(5);
+                vec
+            },
+            DefaultResponse::ERRNOMEDIA => {
+                vec.push(6);
+                vec
+            },
+            DefaultResponse::ERRNOAVAILABLE => {
+                vec.push(7);
+                vec
+            },
+        }
+    }
+}
+
+impl Assembler<DefaultResponse> for DefaultResponse {
+    fn assemble(fragments: &mut Vec<Fragment>) -> Result<DefaultResponse, String> {
+        if fragments[0].data[0] == DEFRESPONSEBIT {
+            match fragments[1].data[0] {
+                0 => {
+                    if fragments[1].data[1] == 1  {
+                        Ok(DefaultResponse::REGISTERED(true))
+                    } else {
+                        Ok(DefaultResponse::REGISTERED(false))
+                    }
+                },
+                1 => {
+                    let mut tmp = Vec::new();
+                    for frag in fragments {
+                        if frag.fragment_index>2 {
+                            if frag.length<128 {
+                                tmp.append(&mut frag.data.split_at(frag.length as usize).0.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.to_vec());
+                            }
+                        }
+                        if frag.fragment_index == 2 {
+                            if frag.length<128 {
+                                let mut data = frag.data.split_at(frag.length as usize).0.to_vec();
+                                tmp.append(&mut data.split_at(1).1.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.split_at(1).1.to_vec());
+                            }
+                        }
+                    }
+                    let vecs = split_on_one(tmp);
+                    let mut vec = Vec::new(); 
+                    for bytes in  vecs {
+                        let mut ser = serialize(bytes);
+                        let str = <String as Assembler<String>>::assemble(&mut ser);
+                        if let Some(res) = str.ok() {
+                            vec.push(res);
+                        }
+                    }
+                    Ok(DefaultResponse::ALLTEXT(vec))
+                },
+                2 => {
+                    let mut tmp = Vec::new();
+                    for frag in fragments {
+                        if frag.fragment_index>2 {
+                            if frag.length<128 {
+                                tmp.append(&mut frag.data.split_at(frag.length as usize).0.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.to_vec());
+                            }
+                        }
+                        if frag.fragment_index == 2 {
+                            if frag.length<128 {
+                                let mut data = frag.data.split_at(frag.length as usize).0.to_vec();
+                                tmp.append(&mut data.split_at(1).1.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.split_at(1).1.to_vec());
+                            }
+                        }
+                    }
+                    let vecs = split_on_one(tmp);
+                    let mut vec = Vec::new(); 
+                    for bytes in  vecs {
+                        let mut ser = serialize(bytes);
+                        let str = <String as Assembler<String>>::assemble(&mut ser);
+                        if let Some(res) = str.ok() {
+                            vec.push(res);
+                        }
+                    }
+                    Ok(DefaultResponse::ALLMEDIALINKS(vec))
+                },
+                3 => {
+                    let mut tmp = Vec::new();
+                    for frag in fragments {
+                        if frag.fragment_index>2 {
+                            if frag.length<128 {
+                                tmp.append(&mut frag.data.split_at(frag.length as usize).0.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.to_vec());
+                            }
+                        }
+                        if frag.fragment_index == 2 {
+                            if frag.length<128 {
+                                let mut data = frag.data.split_at(frag.length as usize).0.to_vec();
+                                tmp.append(&mut data.split_at(1).1.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.split_at(1).1.to_vec());
+                            }
+                        }
+                    }
+                    Ok(DefaultResponse::ALLAVAILABLE(tmp))
+                },
+                4 =>{
+                    if fragments[1].data[1] >=1 && fragments[1].data[1] <= 3 {
+                        Ok(DefaultResponse::SERVERTYPE(fragments[1].data[1]))
+                    } else {
+                        Err("Error in getting the type".to_string())
+                    }
+                },
+                5 => {
+                    Ok(DefaultResponse::ERRNOTEXT)
+                },
+                6 => {
+                    Ok(DefaultResponse::ERRNOMEDIA)
+                },
+                7 => {
+                    Ok(DefaultResponse::ERRNOAVAILABLE)
+                },
+                _ => {
+                    Err("Error when reconstructing message".to_string())
+                }
+            }
+        } else {
+            Err("Wrong bit for Default Response Reconstruction".to_string())
+        }
+    }
+}
+
+#[derive(Debug,Clone)]
+pub enum ContentResponse {
+    TEXT(Vec<String>),
+    MEDIAIMAGE(DynamicImage),
+    MEDIAUDIO(AudioSource),
+    NOTEXTFOUND,
+    NOMEDIAFOUND,
+}
+
+impl Fragmentation<ContentResponse> for ContentResponse {
+    fn fragment(message: ContentResponse) -> Vec<u8> {
+        let mut vec = [CONTENTRESPONSEBIT].to_vec();
+        match message {
+            ContentResponse::TEXT(string) => {
+                vec.push(0);
+                for s in string {
+                    let mut bytes = <String as Fragmentation<String>>::fragment(s);
+                    vec.append(&mut bytes);
+                }
+                vec
+            },
+            ContentResponse::MEDIAIMAGE(img) => {
+                vec.push(1);
+                let mut bytes = <DynamicImage as Fragmentation<DynamicImage>>::fragment(img);
+                vec.append(&mut bytes);
+                vec
+            },
+            ContentResponse::MEDIAUDIO(src) => {
+                vec.push(2);
+                let mut bytes = <AudioSource as Fragmentation<AudioSource>>::fragment(src);
+                vec.append(&mut bytes);
+                vec
+            },
+            ContentResponse::NOTEXTFOUND => {
+                vec.push(3);
+                vec
+            },
+            ContentResponse::NOMEDIAFOUND => {
+                vec.push(4);
+                vec
+            }
+        }
+    }
+}
+
+impl Assembler<ContentResponse> for ContentResponse {
+    fn assemble(fragments: &mut Vec<Fragment>) -> Result<ContentResponse, String> {
+        if fragments[0].data[0] == CONTENTRESPONSEBIT {
+            match fragments[1].data[0] {
+                0 => {
+                    let mut tmp = Vec::new();
+                    for frag in fragments {
+                        if frag.fragment_index>2 {
+                            if frag.length<128 {
+                                tmp.append(&mut frag.data.split_at(frag.length as usize).0.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.to_vec());
+                            }
+                        }
+                        if frag.fragment_index == 2 {
+                            if frag.length<128 {
+                                let mut data = frag.data.split_at(frag.length as usize).0.to_vec();
+                                tmp.append(&mut data.split_at(1).1.to_vec());
+                            } else {
+                                tmp.append(&mut frag.data.split_at(1).1.to_vec());
+                            }
+                        }
+                    }
+                    let vecs = split_on_one(tmp);
+                    let mut vec = Vec::new(); 
+                    for bytes in  vecs {
+                        let mut ser = serialize(bytes);
+                        let str = <String as Assembler<String>>::assemble(&mut ser);
+                        if let Some(res) = str.ok() {
+                            vec.push(res);
+                        }
+                    }
+                    Ok(ContentResponse::TEXT(vec))
+                },
+                1 => {
+                    if fragments[1].data[1] == IMAGEBIT {
+                        let mut tmp = Vec::new();
+                        for frag in fragments {
+                            if frag.fragment_index == 2 {
+                                if frag.length < 128 {
+                                    let mut data = frag.data.split_at(frag.length as usize).0.to_vec();
+                                    tmp.append(&mut data.split_at(1).1.to_vec());
+                                } else {
+                                    tmp.append(&mut frag.data.split_at(1).1.to_vec());
+                                }
+                            } 
+                            if frag.fragment_index > 2 {
+                                if frag.length<128 {
+                                    tmp.append(&mut frag.data.split_at(frag.length as usize).0.to_vec());
+                                } else {
+                                    tmp.append(&mut frag.data.to_vec());
+                                }
+                            }
+                        }
+                        let mut ser = serialize(tmp);
+                        let img = <DynamicImage as Assembler<DynamicImage>>::assemble(&mut ser);
+                        if let Some(res) = img.clone().ok() {
+                            return Ok(ContentResponse::MEDIAIMAGE(res));
+                        } else {
+                            return Err(img.clone().err().unwrap());
+                        }
+                    } else {
+                        Err("IMAGEBIT diffrent than the bit found".to_string())
+                    }
+                }, 
+                2 => {
+                    if fragments[1].data[1] == AUDIOBIT {
+                        let mut tmp = Vec::new();
+                        for frag in fragments {
+                            if frag.fragment_index == 2 {
+                                if frag.length < 128 {
+                                    let mut data = frag.data.split_at(frag.length as usize).0.to_vec();
+                                    tmp.append(&mut data.split_at(1).1.to_vec());
+                                } else {
+                                    tmp.append(&mut frag.data.split_at(1).1.to_vec());
+                                }
+                            } 
+                            if frag.fragment_index > 2 {
+                                if frag.length<128 {
+                                    tmp.append(&mut frag.data.split_at(frag.length as usize).0.to_vec());
+                                } else {
+                                    tmp.append(&mut frag.data.to_vec());
+                                }
+                            }
+                        }
+                        let mut ser = serialize(tmp);
+                        let src = <AudioSource as Assembler<AudioSource>>::assemble(&mut ser);
+                        if let Some(res) = src.clone().ok() {
+                            return Ok(ContentResponse::MEDIAUDIO(res));
+                        } else {
+                            return Err(src.clone().err().unwrap());
+                        }
+                    } else {
+                        Err("AUDIOBIT diffrent than the bit found".to_string())
+                    }
+                }, 
+                3 => {
+                    Ok(ContentResponse::NOTEXTFOUND)
+                },
+                4 => {
+                    Ok(ContentResponse::NOMEDIAFOUND)
+                },
+                _ => {
+                    Err("No Appropriate Response Found".to_string())
+                }
+            } 
+        } else {
+            Err("Wrong bit for ContentResponse reconstruction".to_string())
+        }
+    }
+}
 
 fn slice_to_array(slice: &[u8], len: usize) -> [u8; 128] {
     let mut res: [u8; 128] = [0; 128];
@@ -477,8 +833,12 @@ pub fn serialize(datas: Vec<u8>) -> Vec<Fragment> {
     vec
 }
 
+
+
 #[cfg(test)]
 mod test {
+
+    use std::{fs, io::Read};
 
     use super::*;
 
@@ -561,7 +921,7 @@ mod test {
     #[test]
     fn test5() {
         let img =
-            image::open("/home/stefano/Downloads/drone_image.png").expect("Failed to open image");
+            image::open("../../assets/test/media/image/drone.png").expect("Failed to open image");
 
         let mut frags =
             <image::DynamicImage as Fragmentation<image::DynamicImage>>::fragment(img.clone());
@@ -584,7 +944,7 @@ mod test {
 
     #[test]
     fn test6() {
-        let def_req = DefaultsRequest::LOGIN;
+        let def_req = DefaultsRequest::REGISTER;
         let def_bytes = <DefaultsRequest as Fragmentation<DefaultsRequest>>::fragment(def_req);
         let mut def_frag = serialize(def_bytes);
         if def_frag[0].fragment_index == 1 && def_frag[0].data[0] == 4 {
@@ -633,6 +993,165 @@ mod test {
             println!("{:?}",asmb.err());
             assert_eq!(1,2);
         }
+    }
 
+    #[test]
+    fn test9() {
+        let dfrsp = DefaultResponse::REGISTERED(true);
+        let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
+        let mut ser =  serialize(fr.clone());
+        let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
+        if asmb.is_ok() {
+            match asmb.ok().unwrap() {
+                DefaultResponse::REGISTERED(val) =>{
+                    match dfrsp.clone() {
+                        DefaultResponse::REGISTERED(v) =>{
+                            assert_eq!(val,v);
+                            println!("Something went very wrong");
+                        },
+                        _=>{
+                        }
+                    }
+                }, _=>{}
+            }
+        }
+    }
+
+    #[test]
+    fn test10() {
+        let dfrsp = DefaultResponse::ALLTEXT(["Hello".to_string(),"world".to_string(),"!".to_string(),"Or".to_string(),"Something like that".to_string()].to_vec());
+        let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
+        let mut ser = serialize(fr);
+        let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
+        if asmb.clone().is_ok() {
+            match asmb.clone().ok().unwrap() {
+                DefaultResponse::ALLTEXT(val) =>{
+                    match dfrsp.clone() {
+                        DefaultResponse::ALLTEXT(v) =>{
+                            assert_eq!(val.clone(),v.clone());
+                            eprintln!("{:?}\n{:?}",val.clone(),v.clone());
+                        },
+                        _=>{
+                        }
+                    }
+                }, _=>{}
+            }
+        } else {
+            eprintln!("{}",asmb.err().unwrap());
+            assert_eq!(1,2);
+        }
+    }
+
+    #[test]
+    fn test11() {
+        let dfrsp: DefaultResponse = DefaultResponse::ALLMEDIALINKS(["Hello".to_string(),"world".to_string(),"!".to_string(),"Or".to_string(),"Something like that".to_string()].to_vec());
+        let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
+        let mut ser = serialize(fr);
+        let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
+        if asmb.is_ok() {
+            match asmb.ok().unwrap() {
+                DefaultResponse::ALLMEDIALINKS(val) =>{
+                    match dfrsp.clone() {
+                        DefaultResponse::ALLMEDIALINKS(v) =>{
+                            eprintln!("{:?}\n{:?}",val.clone(),v.clone());
+                            assert_eq!(val,v);
+
+                        },
+                        _=>{
+                        }
+                    }
+                }, _=>{}
+            }
+        }
+    }
+
+    #[test]
+    fn test12() {
+        let dfrsp = DefaultResponse::ALLAVAILABLE([11,22,44,55].to_vec());
+        let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
+        let mut ser = serialize(fr);
+        let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
+        match asmb {
+            Ok(df)=>{
+                match df.clone() {
+                    DefaultResponse::ALLAVAILABLE(ids) => {
+                        eprintln!("{:?}",ids);
+                        assert_eq!(ids,[11,22,44,55].to_vec());
+                    }, _=>{}
+                }
+            },
+            Err(e) => {
+                eprintln!("{}",e);
+                assert_eq!(1,2);
+            }
+        }
+    }
+
+    #[test]
+    fn test13() {
+        let dfrsp = DefaultResponse::SERVERTYPE(1);
+        let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
+        let mut ser = serialize(fr);
+        let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
+        if asmb.is_ok() {
+            match asmb.ok().unwrap() {
+                DefaultResponse::SERVERTYPE(val) =>{
+                    match dfrsp.clone() {
+                        DefaultResponse::SERVERTYPE(v) =>{
+                            assert_eq!(val,v);
+                        },
+                        _=>{
+                        }
+                    }
+                }, _=>{}
+            }
+        }
+    }
+
+    #[test]
+    fn test14 () {
+        let track_bytes = fs::read("../../assets/test/media/audio/track_1.mp3").expect("File not found");
+        let track = AudioSource {
+            bytes: Arc::from(track_bytes)
+        };
+        let fr = <AudioSource as Fragmentation<AudioSource>>::fragment(track.clone());
+
+        let ser = serialize(fr.clone());
+
+        let asmb = <AudioSource as Assembler<AudioSource>>::assemble(&mut ser.clone());
+
+        match asmb {
+            Ok(tr) => {
+                eprintln!("Track reconstruction gone wrong");
+                assert_eq!(track.clone().bytes,tr.clone().bytes);
+            },
+            Err(s) => {
+                eprintln!("{}",s);
+                assert_eq!(1,2);
+            }
+        }        
+    }
+
+    #[test]
+    fn test15() {
+        let dfrsp = ContentResponse::TEXT(["Hello".to_string(),"world".to_string(),"!".to_string(),"Or".to_string(),"Something like that".to_string()].to_vec());
+        let fr = <ContentResponse as Fragmentation<ContentResponse>>::fragment(dfrsp.clone());
+        let mut ser = serialize(fr);
+        let asmb = <ContentResponse as Assembler<ContentResponse>>::assemble(&mut ser.clone());
+        if asmb.is_ok() {
+            match asmb.ok().unwrap() {
+                ContentResponse::TEXT(val) =>{
+                    match dfrsp.clone() {
+                        ContentResponse::TEXT(v) =>{
+                            eprintln!("{:?}\n{:?}",val.clone(),v.clone());
+                            assert_eq!(val,v);
+
+                        },
+                        _=>{
+                        }
+                    }
+                }, _=>{}
+            }
+        }
     }
 }
