@@ -28,11 +28,7 @@ const CHATAUDIOBIT: u8 = 9;
 const DEFRESPONSEBIT: u8 = 10;
 const CONTENTRESPONSEBIT: u8 = 11;
 
-///TODO::
-/// -Specific comments on what the code does
-/// -impl Fragmentation and Assembler for ContentRequest and ChatRequest
-/// -Message structure with generic type T: Fragmentation + Assembler ??
-/// -Review on auxiliary fuctions
+
 
 // Trait to handle message fragmentation
 //      Every impl Fragemntation has a diff recognition bit, that is the first element
@@ -94,6 +90,7 @@ fn split_on_one(input: Vec<u8>) -> Vec<Vec<u8>> {
 
     result
 }
+
 // Trait to assemble fragments into the original message
 pub trait Assembler<T: Fragmentation<T>> {
     fn assemble(fragments: &mut Vec<Fragment>) -> Result<T, String>;
@@ -215,8 +212,32 @@ pub enum DefaultsRequest {
     GETALLTEXT,       //request all text file inside of content server
     GETALLMEDIALINKS, //request all media links insede of content server
     GETALLAVAILABLE,  //get all client available for chatting
-    GETSERVERTYPE,
-    GETCLIENTTYPE,
+    GETSERVERTYPE,    //get servertype
+    GETCLIENTTYPE,   //consider removing it
+}
+
+impl DefaultsRequest {
+    fn new_register_req()->Self {
+        Self::REGISTER
+    }
+
+    fn new_get_all_text_req()->Self {
+        Self::GETALLTEXT
+    }
+
+    fn new_get_all_media_req()->Self {
+        Self::GETALLMEDIALINKS
+    }
+
+    fn new_get_all_chatters_req()->Self{
+        Self::GETALLAVAILABLE
+    }
+
+    fn new_get_server_type()->Self{
+        Self::GETSERVERTYPE
+    }
+
+
 }
 
 impl Fragmentation<DefaultsRequest> for DefaultsRequest {
@@ -268,6 +289,16 @@ impl Assembler<DefaultsRequest> for DefaultsRequest {
 pub enum ContentRequest {
     GETTEXT(String), //get specific text file, String is the path inside the assets directory
     GETMEDIA(String), //get specific media, String is the path inside of the assets directory
+}
+
+impl ContentRequest {
+    pub fn new_get_text_req(path: String)->Self {
+        ContentRequest::GETTEXT(path)
+    }
+
+    pub fn new_get_media_req(path: Sting)->Self {
+        ContentRequest::GETMEDIA(path)
+    }
 }
 
 impl Fragmentation<ContentRequest> for ContentRequest {
@@ -325,6 +356,19 @@ pub enum ChatMessages {
     CHATAUDIO(NodeId, NodeId, AudioSource),
 }
 
+impl ChatMessages {
+    pub fn new_string_msg(src: NodeId, dst: NodeId, msg: String)->Self {
+        ChatMessages::CHATSTRING(src, dst, msg)
+    }
+
+    pub fn new_image_msg(src: NodeId, dst: NodeId, img: DynamicImage)->Self {
+        ChatMessages::CHATIMAGE(src, dst, img)
+    }
+
+    pub fn new_audio_msg(src: NodeId, dst: NodeId, track: AudioSource)->Self {
+        ChatMessages::CHATAUDIO(src, dst, track)
+    }
+}
 
 impl Fragmentation<ChatMessages> for ChatMessages {
     fn fragment(message: ChatMessages) -> Vec<u8> {
@@ -435,6 +479,33 @@ pub enum DefaultResponse {
     ERRNOTEXT,
     ERRNOMEDIA,
     ERRNOAVAILABLE,
+}
+
+impl DefaultResponse {
+    pub fn new_registered_rsp (val: bool) -> Self {
+        DefaultResponse::REGISTERED(val)
+    }
+    pub fn new_all_text_rsp (text_links: Vec<String>) -> Self {
+        DefaultResponse::ALLTEXT(text_links)
+    }
+    pub fn new_all_media_rsp (media_links: Vec<String>) -> Self {
+        DefaultResponse::ALLMEDIALINKS(media_links)
+    }
+    pub fn new_available_rsp (available_ids: Vec<NodeId>) -> Self {
+        DefaultResponse::ALLAVAILABLE(available_ids)
+    }
+    pub fn new_server_type_rsp (id_type: u8) -> Self {
+        DefaultResponse::SERVERTYPE(id_type)
+    }
+    pub fn new_err_no_text_rsp () -> Self {
+        DefaultResponse::ERRNOTEXT
+    }
+    pub fn new_err_no_media_rsp () -> Self {
+        DefaultResponse::ERRNOMEDIA
+    }
+    pub fn new_no_available_rsp () -> Self {
+        DefaultResponse::ERRNOAVAILABLE
+    }
 }
 
 impl Fragmentation<DefaultResponse> for DefaultResponse {
@@ -620,6 +691,28 @@ pub enum ContentResponse {
     MEDIAUDIO(AudioSource),
     NOTEXTFOUND,
     NOMEDIAFOUND,
+}
+
+impl ContentResponse {
+    pub fn new_text_resp(text: Vec<String>)->Self {
+        Self::TEXT(text)
+    }
+
+    pub fn new_img_resp(img: DynamicImage)->Self {
+        Self::MEDIAIMAGE(img)
+    }
+
+    pub fn new_audio_resp(track: AudioSource)->Self {
+        Self::MEDIAUDIO(track)
+    }
+
+    pub fn new_no_text_found_resp()->Self {
+        Self::NOTEXTFOUND
+    }
+
+    pub fn new_no_media_found_resp()->Self{
+        Self::NOMEDIAFOUND
+    }
 }
 
 impl Fragmentation<ContentResponse> for ContentResponse {
