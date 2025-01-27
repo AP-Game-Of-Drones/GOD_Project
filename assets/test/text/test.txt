@@ -1,0 +1,3 @@
+Hello!
+World 
+../../assets/test/media/image/drone.png
