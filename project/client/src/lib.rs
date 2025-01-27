@@ -62,8 +62,8 @@ use rand::*;
 
 #[derive(Clone)]
 pub enum ClientType {
-    ChatClient(Client),
-    WebBrowser(Client),
+    ChatClient,
+    WebBrowser,
 }
 // Client structure representing a client node in the network
 #[derive(Clone)]
@@ -78,24 +78,21 @@ pub struct Client {
     pub holder_sent: HashMap<(u64,NodeId), Vec<Fragment>>, //fragment holder of sent messages, use session_id,src_id tuple as key
     pub holder_frag_index: HashMap<(u64,NodeId), Vec<u64>>, //fragment indices holder, use session_id,src_id tuple as key
     pub holder_rec: HashMap<(u64,NodeId), Vec<u8>>, //data holder of received messages, use session_id,src_id tuple as key
-    pub current_path: Vec<NodeId>,               //current path used
 }
 
 #[derive(Clone)]
-pub struct WebBrowser<T>
-where
-    T: Fragmentation<T> + Assembler<T>,
+pub struct WebBrowser
 {
+    pub inner_client: Client,
     pub client_type: ClientType,
     pub history: HashMap<u8, String>,
-    pub media: Vec<T>,
+    pub text_servers: Vec<NodeId>,
+    pub media_servers: Vec<NodeId>,
+    pub media: Vec<Message>,
     pub gui: WebGui,
 }
 
-impl<T> WebBrowser<T>
-where
-    T: Fragmentation<T> + Assembler<T>,
-{
+impl WebBrowser{
     pub fn new(
         id: NodeId,
         controller_send: Sender<NodeEvent>,
@@ -104,13 +101,16 @@ where
         packet_send: HashMap<NodeId, Sender<Packet>>,
     ) -> Self {
         Self {
-            client_type: ClientType::WebBrowser(Client::new(
+            inner_client: Client::new(
                 id,
                 controller_send,
                 controller_recv,
                 packet_recv,
                 packet_send,
-            )),
+            ),
+            client_type: ClientType::WebBrowser,
+            text_servers: Vec::new(),
+            media_servers: Vec::new(),
             history: HashMap::new(),
             media: Vec::new(),
             gui: WebGui,
@@ -125,19 +125,17 @@ impl Plugin for WebGui {
 }
 
 #[derive(Clone)]
-pub struct ChatClient<T>
-where
-    T: Fragmentation<T> + Assembler<T>,
+pub struct ChatClient
 {
+    pub inner_client: Client,
     pub client_type: ClientType,
-    pub sent: HashMap<u8, T>,
-    pub received: HashMap<u8, T>,
+    pub chat_servers: Vec<NodeId>,
+    pub sent: HashMap<u8 ,Message>,
+    pub received: HashMap<u8, Message>,
     pub gui: ChatGui,
 }
 
-impl<T> ChatClient<T>
-where
-    T: Fragmentation<T> + Assembler<T>,
+impl ChatClient
 {
     pub fn new(
         id: NodeId,
@@ -147,18 +145,65 @@ where
         packet_send: HashMap<NodeId, Sender<Packet>>,
     ) -> Self {
         Self {
-            client_type: ClientType::ChatClient(Client::new(
+            inner_client: Client::new(
                 id,
                 controller_send,
                 controller_recv,
                 packet_recv,
                 packet_send,
-            )),
+            ),
+            client_type: ClientType::ChatClient,
+            chat_servers: Vec::new(),
             sent: HashMap::new(),
             received: HashMap::new(),
             gui: ChatGui,
         }
     }
+
+    pub fn send_register(&mut self,dst:NodeId)->Result<(()),String> {
+        let new_req = Message::DefaultsRequest(DefaultsRequest::REGISTER);
+        let bytes_res = deconstruct_message(new_req);
+        match bytes_res {
+            Ok(bytes) => {
+                let mut fragments: Vec<Fragment> = serialize(bytes);
+                let mut session_id = 0;
+                while !self.inner_client.session_id_alredy_used(session_id) {
+                    session_id = rand_session_id();
+                }
+                let packets = fragment_packetization(&mut fragments, self.inner_client.get_hops(dst) , session_id);
+                for pack in packets {
+                    match self.inner_client.send_new_packet(pack.clone()) {
+                        Ok(_) => {},
+                        Err(e) => {return Err(e.to_string());}
+                    } 
+                }
+                Ok(())
+            },
+            Err(e) => {
+                Err(e)
+            }
+        }
+
+    }
+
+    
+
+}
+
+
+fn rand_session_id()->u64{
+    rand::random()
+}
+
+fn fragment_packetization(fragments: &mut Vec<Fragment>, hops: Vec<u8>, session_id: u64)->Vec<Packet> {
+    let mut vec = Vec::new();
+    fragments.sort_by_key(|f| f.fragment_index);
+
+    for f in fragments {
+        let packet = Packet::new_fragment(SourceRoutingHeader::with_first_hop(hops.clone()), session_id, f.clone());
+        vec.push(packet);
+    }
+    vec
 }
 
 #[derive(Clone)]
@@ -225,8 +270,20 @@ impl Client {
             holder_sent: HashMap::new(),
             holder_frag_index: HashMap::new(),
             holder_rec: HashMap::new(),
-            current_path: Vec::new(),
         }
+    }
+
+    fn session_id_alredy_used(&self,session_id: u64)->bool {
+        if self.holder_sent.contains_key(&(session_id,self.id)){
+            true
+        } else {
+            false
+        }
+    }
+
+    fn get_hops(&mut self, dst: u8)->Vec<u8> {
+        self.client_topology.set_path_based_on_dst(dst);
+        self.client_topology.get_current_path()
     }
 
     pub fn run(&mut self) {
@@ -323,113 +380,20 @@ impl Client {
         }
     }
 
-    fn send_new_default_request(
-        &self,
-        server_id: NodeId,
-        session_id: u64,
-        request: DefaultsRequest,
-    ) -> Result<(()), &str> {
-        let paths = self.client_topology.shortest_path(self.id, server_id);
-        let bytes =
-            <DefaultsRequest as fragmentation_handling::Fragmentation<DefaultsRequest>>::fragment(
-                request,
-            );
-        let fragments = fragmentation_handling::serialize(bytes);
-        let mut packets = Vec::new();
-
-        if let Some(trace) = paths {
-            for fr in fragments {
-                packets.push(Packet::new_fragment(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fr,
-                ));
-            }
-            if trace[0] == self.id {
-                for packet in packets {
-                    self.packet_send
-                        .get(&trace[1])
-                        .unwrap()
-                        .send(packet.clone())
-                        .expect("Sender error");
-                }
-                Ok(())
-            } else {
-                for mut packet in packets {
-                    let mut vec = [self.id].to_vec();
-                    packet.routing_header.hops.append(&mut vec);
-                    packet.routing_header.hops = vec.clone();
-                    self.packet_send
-                        .get(&trace[1])
-                        .unwrap()
-                        .send(packet.clone())
-                        .expect("Sender error");
-                }
-                Ok(())
-            }
-        } else {
-            Err("Error in source routing")
-        }
-    }
-
-    fn send_new_string_query(
-        &self,
-        server_id: NodeId,
-        session_id: u64,
-        query: String,
-    ) -> Result<(()), &str> {
-        let paths = self.client_topology.shortest_path(self.id, server_id);
-        let bytes = <String as fragmentation_handling::Fragmentation<String>>::fragment(query);
-        let fragments = fragmentation_handling::serialize(bytes);
-        let mut packets = Vec::new();
-
-        if let Some(trace) = paths {
-            for fr in fragments {
-                packets.push(Packet::new_fragment(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fr,
-                ));
-            }
-            if trace[0] == self.id {
-                for packet in packets {
-                    self.packet_send
-                        .get(&trace[1])
-                        .unwrap()
-                        .send(packet.clone())
-                        .expect("Sender error");
-                }
-                Ok(())
-            } else {
-                for mut packet in packets {
-                    let mut vec = [self.id].to_vec();
-                    packet.routing_header.hops.append(&mut vec);
-                    packet.routing_header.hops = vec.clone();
-                    self.packet_send
-                        .get(&trace[1])
-                        .unwrap()
-                        .send(packet.clone())
-                        .expect("Sender error");
-                }
-                Ok(())
-            }
-        } else {
-            Err("Error in source routing")
-        }
-    }
 
     fn send_new_generic_fragment(
-        &self,
+        &mut self,
         server_id: NodeId,
         session_id: u64,
         fragment: Fragment,
     ) -> Result<(()), &str> {
-        if let Some(trace) = self.client_topology.shortest_path(self.id, server_id) {
-            if let Some(sender) = self.packet_send.get(&trace[0]) {
+        self.client_topology.set_path_based_on_dst(server_id);
+        let trace = self.client_topology.get_current_path();
+            if let Some(sender) = self.packet_send.get(&trace[1]) {
                 if let Ok(_) = sender.send(Packet::new_fragment(
                     SourceRoutingHeader::with_first_hop(trace.clone()),
                     session_id,
-                    fragment,
+                    fragment.clone(),
                 )) {
                     return Ok(());
                 } else {
@@ -438,8 +402,16 @@ impl Client {
             } else {
                 return Err("Sender not found");
             }
+    }
+
+    fn send_new_packet(&self, packet: Packet)->Result<(()),&str> {
+        if let Some(sender) = self.packet_send.get(&packet.routing_header.hops[1]){
+            match sender.send(packet.clone()) {
+                Ok(_)=> Ok(()),
+                Err(_) => Err("Something wrong with the sender")
+            }
         } else {
-            return Err("No path found");
+            Err("First hop is wrong")
         }
     }
 
@@ -490,7 +462,7 @@ impl Client {
                 if let Some(fr) = self.holder_sent.get(&(session_id,self.id)) {
                     for f in fr.clone() {
                         if f.fragment_index == nack.fragment_index {
-                            return self.send_new_generic_fragment(*self.current_path.last().unwrap(), session_id, f.clone());
+                            return self.send_new_generic_fragment(dst, session_id, f.clone());
                         }
                     }
                 } else {
@@ -553,7 +525,6 @@ impl Client {
                 if let Some(mut data) = self.holder_rec.get_mut(&(session_id, src)) {
                     remove_trailing_zeros(&mut data);
 
-                    println!("{}",data[1]);
                     res = fragmentation_handling::reconstruct_message(
                         data[0],
                         &mut serialize(data.to_vec()),
@@ -574,7 +545,8 @@ impl Client {
                 update_holder_rec(&mut self.holder_rec.get_mut(&(session_id,src)).unwrap(),&frag.data,  frag.length as usize, (session_id, src), frag.fragment_index as usize);
             self.holder_frag_index.insert((session_id,src),[frag.fragment_index].to_vec());
         }
-        let path  = self.client_topology.shortest_path(self.id, src).unwrap();
+        self.client_topology.set_path_based_on_dst(src);
+        let path  = self.client_topology.get_current_path();
         self.send_ack(session_id, &self.id, path, frag.fragment_index);
         res
     }
