@@ -296,7 +296,7 @@ impl ContentRequest {
         ContentRequest::GETTEXT(path)
     }
 
-    pub fn new_get_media_req(path: Sting)->Self {
+    pub fn new_get_media_req(path: String)->Self {
         ContentRequest::GETMEDIA(path)
     }
 }
