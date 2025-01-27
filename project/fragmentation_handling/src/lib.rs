@@ -27,7 +27,7 @@ const CHATAUDIOBIT: u8 = 9;
 const DEFRESPONSEBIT: u8 = 10;
 const CONTENTRESPONSEBIT: u8 = 11;
 
-
+#[derive(Clone)]
 pub enum Message {
     DefaultsRequest(DefaultsRequest),
     DefaultResponse(DefaultResponse),
@@ -104,6 +104,36 @@ pub fn reconstruct_message (recognition_bit: u8, fragments: &mut Vec<Fragment>)-
         }
     }
 } 
+
+pub fn deconstruct_message (msg: Message)->Result<Vec<u8>,String>{
+    match msg {
+        Message::String(s) =>{
+            Ok(<String as Fragmentation<String>>::fragment(s)) 
+        },
+        Message::Audio(track) =>{
+            Ok(<AudioSource as Fragmentation<AudioSource>>::fragment(track))
+        },
+        Message::Image(img) =>{
+            Ok(<DynamicImage as Fragmentation<DynamicImage>>::fragment(img))
+        },
+        Message::DefaultsRequest(df) =>{
+            Ok(<DefaultsRequest as Fragmentation<DefaultsRequest>>::fragment(df))
+        },
+        Message::ContentRequest(cr) =>{
+            Ok(<ContentRequest as Fragmentation<ContentRequest>>::fragment(cr))
+        },
+        Message::ChatMessages(cm) =>{
+            Ok(<ChatMessages as Fragmentation<ChatMessages>>::fragment(cm))
+        },
+        Message::DefaultResponse(df)=>{
+            Ok(<DefaultResponse as Fragmentation<DefaultResponse>>::fragment(df))
+        },
+        Message::ContentResponse(cr)=>{
+            Ok(<ContentResponse as Fragmentation<ContentResponse>>::fragment(cr))
+        }
+    }
+}
+
 
 // Trait to handle message fragmentation
 //      Every impl Fragemntation has a diff recognition bit, that is the first element

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, u64::MAX};
 use wg_2024::{network::NodeId, packet::NodeType};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -39,6 +39,13 @@ impl Topology {
             paths: None,
             current_path: None,
         }
+    }
+    pub fn get_all_servers(&self)->Vec<NodeId>{
+        self.nodes
+        .values()
+        .filter(|node| node.node_type == NodeType::Server)
+        .map(|node| node.value)
+        .collect()
     }
 
     pub fn update_topology(
@@ -127,6 +134,24 @@ impl Topology {
                 self.current_path = Some((shortest_path.clone(), weight));
             }
         }
+    }
+
+    pub fn set_path_based_on_dst(&mut self, dst: NodeId) {
+        if let Some((paths, w )) = &self.paths {
+            let mut current = MAX;
+            for path in paths {
+                if path[path.clone().len()-1]==dst{
+                    if *w<current {
+                        self.current_path=Some((path.clone(),*w));
+                        current=*w;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn get_current_path(&self)->Vec<u8> {
+        self.current_path.clone().unwrap().0
     }
 
     pub fn increment_weights_for_node(&mut self, node_id: NodeId) {
@@ -243,16 +268,23 @@ mod tests {
         // Setup nodes and adjacencies
         let mut node1 = Node::new(1, NodeType::Drone);
         let mut node2 = Node::new(2, NodeType::Drone);
+        let mut node3 = Node::new(3, NodeType::Drone);
         node1.add_adjacents(2, NodeType::Drone);
+        node1.add_adjacents(3, NodeType::Drone);
+        node2.add_adjacents(3, NodeType::Drone);
         node2.add_adjacents(1, NodeType::Drone);
+        node3.add_adjacents(2, NodeType::Drone);
+        node3.add_adjacents(1, NodeType::Drone);
+        
         topology.add_node(node1);
         topology.add_node(node2);
+        topology.add_node(node3);
 
-        topology.find_all_paths(1, 2);
+        topology.find_all_paths(1, 3);
         topology.update_current_path();
 
         let current_path = topology.current_path.as_ref().unwrap();
-        assert_eq!(current_path.0, vec![1, 2]);
+        assert_eq!(current_path.0, vec![1, 3]);
         assert_eq!(current_path.1, 2); // Weight should be the length of the path
     }
 
