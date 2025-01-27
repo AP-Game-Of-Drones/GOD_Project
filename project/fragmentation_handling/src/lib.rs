@@ -92,10 +92,11 @@ pub fn reconstruct_message (recognition_bit: u8, fragments: &mut Vec<Fragment>)-
             }
         },
         11 =>{
-            if let Ok(res) = <ContentResponse as Assembler<ContentResponse>>::assemble(fragments) {
+            let cr = <ContentResponse as Assembler<ContentResponse>>::assemble(fragments);
+            if let Ok(res) = cr {
                 Ok(Message::ContentResponse(res))
             } else {
-                Err("Failed to reconstruct ContentResponse".to_string())
+                Err(cr.err().unwrap())
             }
         },
         _=>{
@@ -259,23 +260,24 @@ impl Assembler<image::DynamicImage> for image::DynamicImage {
             return Err(
                 "Missing one or more fragments. Cannot reconstruct the message.".to_string(),
             );
-        }
+        }else {
 
-        // Combine data from fragments
-        let mut combined_data = Vec::new();
-        for fragment in fragments.iter() {
-            if fragment.fragment_index != 1 {
-                combined_data.extend_from_slice(&fragment.data[..fragment.length as usize]);
+            // Combine data from fragments
+            let mut combined_data = Vec::new();
+            for fragment in fragments.iter() {
+                if fragment.fragment_index != 1 {
+                    combined_data.extend_from_slice(&fragment.data[..fragment.length as usize]);
+                }
             }
-        }
 
-        let reader = PngDecoder::new(Cursor::new(combined_data)).expect("Error in decoder");
-        let res = image::DynamicImage::from_decoder(reader);
-        // Decode the image
+            let reader = PngDecoder::new(Cursor::new(combined_data)).expect("Error in decoder");
+            let res = image::DynamicImage::from_decoder(reader);
+            // Decode the image
 
-        match res {
-            Ok(image) => Ok(image),
-            Err(_) => Err("Failed to reconstruct the image from fragments.".to_string()),
+            match res {
+                Ok(image) => Ok(image),
+                Err(_) => Err(res.err().unwrap().to_string()),
+            }
         }
     }
 }
@@ -1345,6 +1347,28 @@ mod test {
             match asmb.ok().unwrap() {
                 ContentResponse::TEXT(val) => match dfrsp.clone() {
                     ContentResponse::TEXT(v) => {
+                        eprintln!("{:?}\n{:?}", val.clone(), v.clone());
+                        assert_eq!(val, v);
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test16() {
+        let dfrsp = ContentResponse::MEDIAIMAGE(
+            image::open("../../assets/test/media/image/drone.png").ok().unwrap()
+        );
+        let fr = <ContentResponse as Fragmentation<ContentResponse>>::fragment(dfrsp.clone());
+        let mut ser = serialize(fr);
+        let asmb = <ContentResponse as Assembler<ContentResponse>>::assemble(&mut ser.clone());
+        if asmb.is_ok() {
+            match asmb.ok().unwrap() {
+                ContentResponse::MEDIAIMAGE(val) => match dfrsp.clone() {
+                    ContentResponse::MEDIAIMAGE(v) => {
                         eprintln!("{:?}\n{:?}", val.clone(), v.clone());
                         assert_eq!(val, v);
                     }

@@ -187,9 +187,22 @@ fn generate_flood_id(flood_ids: &mut HashSet<u64>) -> u64 {
     }
 }
 
-fn update_holder_rec(holder_rec: &mut HashMap<(u64,u8),Vec<u8>>,data: &[u8], offset: usize, lenght: usize, key: (u64,NodeId)) {
-    for i in offset..offset+lenght {
-        holder_rec.get_mut(&key).unwrap()[i]=data[i-offset]
+fn update_holder_rec(target: &mut Vec<u8>,data: &[u8], length: usize, key: (u64,NodeId), index: usize) {
+    let mut finish_pos = ((index-1) * 128)+ 1;
+
+    // Handle special case for the first fragment
+    if index == 1 {
+        target[0] = data[0];
+        
+    } else {
+
+        if length<128 {
+            finish_pos-=(128-length);
+        }
+
+        // Copy the fragment data into the correct position in the target vector
+        target[finish_pos-length..finish_pos]
+            .copy_from_slice(&data[..length]);
     }
 }
 
@@ -527,19 +540,20 @@ impl Client {
     ) -> Result<fragmentation_handling::Message, String> {
         let mut res = Err("Not reconstructed yet".to_string());
     
-        // Scope the mutable borrow of `self.holder_frag_index`
+        
         if let Some(holder) = self.holder_frag_index.get_mut(&(session_id, src)) {
             if !holder.contains(&frag.fragment_index) {
-                let offset = frag.length as usize * frag.fragment_index as usize;
-    
-                // Scope ends here
-                update_holder_rec(&mut self.holder_rec,&frag.data, offset, frag.length as usize, (session_id, src));
+                
+                update_holder_rec(&mut self.holder_rec.get_mut(&(session_id,src)).unwrap(),&frag.data,  frag.length as usize, (session_id, src), frag.fragment_index as usize);
+                
                 holder.push(frag.fragment_index);
+            
             }
-            if holder.len() == frag.total_n_fragments as usize {
-                if let Some(data) = self.holder_rec.get_mut(&(session_id, src)) {
-                    remove_trailing_zeros(data);
-    
+            if holder.len() == (frag.total_n_fragments) as usize {
+                if let Some(mut data) = self.holder_rec.get_mut(&(session_id, src)) {
+                    remove_trailing_zeros(&mut data);
+
+                    println!("{}",data[1]);
                     res = fragmentation_handling::reconstruct_message(
                         data[0],
                         &mut serialize(data.to_vec()),
@@ -554,14 +568,174 @@ impl Client {
         } else {
             self.holder_rec.insert(
                 (session_id, src),
-                vec![0; (frag.clone().total_n_fragments * 128) as usize],
+                vec![0; ((frag.clone().total_n_fragments * 128) )as usize],
             );
-            let offset = frag.length as usize * frag.fragment_index as usize;
-            update_holder_rec(&mut self.holder_rec, &frag.data, offset, frag.length as usize, (session_id, src));
+            
+                update_holder_rec(&mut self.holder_rec.get_mut(&(session_id,src)).unwrap(),&frag.data,  frag.length as usize, (session_id, src), frag.fragment_index as usize);
+            self.holder_frag_index.insert((session_id,src),[frag.fragment_index].to_vec());
         }
-    
-        self.send_ack(session_id, &self.id, [].to_vec(), frag.fragment_index);
+        let path  = self.client_topology.shortest_path(self.id, src).unwrap();
+        self.send_ack(session_id, &self.id, path, frag.fragment_index);
         res
     }
     
+}
+
+
+#[cfg(test)]
+mod test {
+    use std::{collections::HashMap, error::Error, fs::{self, File}, io::{BufRead, BufReader}};
+    use crossbeam_channel::*;
+    use super::*;
+
+    fn tester_client()-> Client{
+        let id = 1;
+        let (_,controller_recv) = unbounded::<NodeCommand>(); 
+        let (controller_send,_) = unbounded::<NodeEvent>(); 
+        let (packet_senders,packet_recv) = unbounded::<Packet>(); 
+        let neighbors= [2,3,4];
+        let mut packet_send = HashMap::new();
+        for neigh in neighbors {
+            packet_send.insert(neigh,packet_senders.clone());
+        }
+        Client::new(id, controller_send, controller_recv, packet_recv, packet_send)
+    }
+
+    #[test]
+    fn test1() {
+        let mut client = tester_client();
+        let bytess =fs::read("../../assets/test/media/audio/track_1.mp3").expect("Failed to open image");
+        let audio = AudioSource {
+            bytes: Arc::from(bytess)
+        };
+
+        
+        let message = Message::Audio(audio.clone());
+        let mut msg = ContentResponse::NOMEDIAFOUND;
+        match message {
+            Message::Audio(img) =>{
+                msg = ContentResponse::new_audio_resp(audio.clone());
+            },
+            _ =>{}
+        }
+        let bytes = <ContentResponse as Fragmentation<ContentResponse>>::fragment(msg);
+        let mut fragments = serialize(bytes);
+
+        
+        let mut res = Err("S".to_string());
+
+        for f in fragments {
+            res = client.recv_frag_n_handle(1, 2, &f);
+            
+        }
+        
+        if let Ok(msg) = res {
+            match msg {
+                Message::ContentResponse(cr) => match cr {
+                    ContentResponse::MEDIAUDIO(track1)=> {
+                        assert_eq!(track1.bytes,audio.bytes);
+                    },
+                    _=>{}
+                },
+                _=>{}
+            }
+        } else {
+            eprintln!("{:?}",res.err().unwrap());
+            assert_eq!(1,2);
+        }
+    }
+
+
+    #[test]
+    fn test2() {
+        let mut client = tester_client();
+        let img =image::open("../../assets/test/media/image/drone.png").expect("Failed to open image");
+        
+        let mut msg = ContentResponse::new_img_resp(img.clone());
+        
+        let bytes = <ContentResponse as Fragmentation<ContentResponse>>::fragment(msg.clone());
+        let mut fragments = serialize(bytes);
+
+        
+        let mut res = Err("S".to_string());
+
+        for f in fragments {
+            res = client.recv_frag_n_handle(1, 2, &f);
+            
+        }
+        if let Ok(msg1) = res {
+            match msg1 {
+                Message::ContentResponse(cr) => {
+                    match cr  {
+                        ContentResponse::MEDIAIMAGE(img2) => {
+                            println!("Gone wrong");
+                            assert_eq!(img,img2);
+                        },
+                        ContentResponse::NOMEDIAFOUND=>{
+                            assert_eq!(1,1);
+                        },
+                        _=>{}
+                    }
+                },
+                _=>{}
+            }
+        } else {
+            eprintln!("{:?}",res.err().unwrap());
+            assert_eq!(1,2);
+        }
+    }   
+
+
+    fn read_file_to_lines(file_path: &str) -> Result<Vec<String>, std::io::Error> {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+    
+        // Handle potential errors when collecting lines
+        reader
+            .lines()
+            .collect::<Result<Vec<String>, std::io::Error>>() // Use `Result::collect` to handle errors
+    }
+
+    #[test]
+    fn test3() {
+        let mut client = tester_client();
+        
+        let vecs = read_file_to_lines("../../assets/test/text/test.txt");
+        let vec = vecs.ok().unwrap();
+        let mut msg = ContentResponse::new_text_resp(vec.clone());
+        
+        let bytes = <ContentResponse as Fragmentation<ContentResponse>>::fragment(msg.clone());
+        let mut fragments = serialize(bytes);
+
+        
+        let mut res = Err("S".to_string());
+
+        for f in fragments {
+            res = client.recv_frag_n_handle(1, 2, &f);
+            
+        }
+        if let Ok(msg1) = res {
+            match msg1 {
+                Message::ContentResponse(cr) => {
+                    match cr  {
+                        ContentResponse::TEXT(vecs1) => {
+                            println!("Gone wrong");
+                            assert_eq!(vec.clone(),vecs1.clone());
+                        },
+                        ContentResponse::NOMEDIAFOUND=>{
+                            assert_eq!(1,1);
+                        },
+                        _=>{}
+                    }
+                },
+                _=>{}
+            }
+        } else {
+            eprintln!("{:?}",res.err().unwrap());
+            assert_eq!(1,2);
+        }
+    }   
+
+
+
 }
