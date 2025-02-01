@@ -12,3 +12,4 @@ image = "0.24"
 topology = { path = "../topology" }
 fragmentation_handling = { path = "../fragmentation_handling" }
 rand = "0.8.5"
+dashmap = "6.1.0"

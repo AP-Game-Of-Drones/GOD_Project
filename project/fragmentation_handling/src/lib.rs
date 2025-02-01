@@ -27,7 +27,15 @@ const CHATAUDIOBIT: u8 = 9;
 const DEFRESPONSEBIT: u8 = 10;
 const CONTENTRESPONSEBIT: u8 = 11;
 
-#[derive(Clone)]
+trait MessageSend: Send + Sync + Sized {}
+impl MessageSend for Message{}
+impl MessageSend for DefaultsRequest{}
+impl MessageSend for DefaultResponse{}
+impl MessageSend for ChatMessages{}
+impl MessageSend for ContentRequest{}
+impl MessageSend for ContentResponse{}
+
+#[derive(Clone,Debug)]
 pub enum Message {
     DefaultsRequest(DefaultsRequest),
     DefaultResponse(DefaultResponse),
@@ -40,55 +48,55 @@ pub enum Message {
 }
 
 // Generic function for reconstructing a message
-pub fn reconstruct_message (recognition_bit: u8, fragments: &mut Vec<Fragment>)->Result<Message,String>{
+pub fn reconstruct_message (recognition_bit: u8, fragments: &mut Vec<Fragment>)->Result<Message,&str>{
     match recognition_bit {
         1 =>{
             if let Ok(res) = <String as Assembler<String>>::assemble(fragments) {
                 Ok(Message::String(res))
             } else {
-                Err("Failed to reconstruct String".to_string())
+                Err("Failed to reconstruct String")
             }
         },
         2 =>{
             if let Ok(res) = <AudioSource as Assembler<AudioSource>>::assemble(fragments) {
                 Ok(Message::Audio(res))
             } else {
-                Err("Failed to reconstruct Audio".to_string())
+                Err("Failed to reconstruct Audio")
             }
         },
         3 =>{
             if let Ok(res) = <DynamicImage as Assembler<DynamicImage>>::assemble(fragments) {
                 Ok(Message::Image(res))
             } else {
-                Err("Failed to reconstruct Image".to_string())
+                Err("Failed to reconstruct Image")
             }
         },
         4 =>{
           if let Ok(res) = <DefaultsRequest as Assembler<DefaultsRequest>>::assemble(fragments) {
                 Ok(Message::DefaultsRequest(res))
             } else {
-                Err("Failed to reconstruct DefaultRequest".to_string())
+                Err("Failed to reconstruct DefaultRequest")
             }
         },
         5 |6 =>{
             if let Ok(res) = <ContentRequest as Assembler<ContentRequest>>::assemble(fragments) {
                 Ok(Message::ContentRequest(res))
             } else {
-                Err("Failed to reconstruct ContentRequest".to_string())
+                Err("Failed to reconstruct ContentRequest")
             }
         },
         7|8|9 =>{
             if let Ok(res) = <ChatMessages as Assembler<ChatMessages>>::assemble(fragments) {
                 Ok(Message::ChatMessages(res))
             } else {
-                Err("Failed to reconstruct ChatMessage".to_string())
+                Err("Failed to reconstruct ChatMessage")
             }
         },
         10 =>{
             if let Ok(res) = <DefaultResponse as Assembler<DefaultResponse>>::assemble(fragments) {
                 Ok(Message::DefaultResponse(res))
             } else {
-                Err("Failed to reconstruct DefaultResponse".to_string())
+                Err("Failed to reconstruct DefaultResponse")
             }
         },
         11 =>{
@@ -96,11 +104,11 @@ pub fn reconstruct_message (recognition_bit: u8, fragments: &mut Vec<Fragment>)-
             if let Ok(res) = cr {
                 Ok(Message::ContentResponse(res))
             } else {
-                Err(cr.err().unwrap())
+                Err("Failed to reconstruct ContentResponse")
             }
         },
         _=>{
-            Err("Bit recognition didn't produce any result".to_string())
+            Err("Bit recognition didn't produce any result")
         }
     }
 } 
@@ -597,19 +605,19 @@ impl Assembler<ChatMessages> for ChatMessages {
 
 #[derive(Debug, Clone)]
 pub enum DefaultResponse {
-    REGISTERED(bool),
+    REGISTERED(bool,NodeId),
     ALLTEXT(Vec<String>),
     ALLMEDIALINKS(Vec<String>),
     ALLAVAILABLE(Vec<NodeId>),
-    SERVERTYPE(u8), //1: textServer, 2: mediaServer, 3: chatServer
+    SERVERTYPE(u8,NodeId), //1: textServer, 2: mediaServer, 3: chatServer
     ERRNOTEXT,
     ERRNOMEDIA,
     ERRNOAVAILABLE,
 }
 
 impl DefaultResponse {
-    pub fn new_registered_rsp(val: bool) -> Self {
-        DefaultResponse::REGISTERED(val)
+    pub fn new_registered_rsp(val: bool, id: NodeId) -> Self {
+        DefaultResponse::REGISTERED(val,id)
     }
     pub fn new_all_text_rsp(text_links: Vec<String>) -> Self {
         DefaultResponse::ALLTEXT(text_links)
@@ -620,8 +628,8 @@ impl DefaultResponse {
     pub fn new_available_rsp(available_ids: Vec<NodeId>) -> Self {
         DefaultResponse::ALLAVAILABLE(available_ids)
     }
-    pub fn new_server_type_rsp(id_type: u8) -> Self {
-        DefaultResponse::SERVERTYPE(id_type)
+    pub fn new_server_type_rsp(id_type: u8, id: NodeId) -> Self {
+        DefaultResponse::SERVERTYPE(id_type,id)
     }
     pub fn new_err_no_text_rsp() -> Self {
         DefaultResponse::ERRNOTEXT
@@ -639,12 +647,12 @@ impl Fragmentation<DefaultResponse> for DefaultResponse {
         let mut vec = [DEFRESPONSEBIT].to_vec();
 
         match message {
-            DefaultResponse::REGISTERED(val) => {
+            DefaultResponse::REGISTERED(val,id) => {
                 let mut bit = 0;
                 if val {
                     bit = 1;
                 }
-                let mut vec_1 = [0, bit].to_vec();
+                let mut vec_1 = [0, bit,id].to_vec();
                 vec.append(&mut vec_1);
                 vec
             }
@@ -671,9 +679,10 @@ impl Fragmentation<DefaultResponse> for DefaultResponse {
                 }
                 vec
             }
-            DefaultResponse::SERVERTYPE(typ) => {
+            DefaultResponse::SERVERTYPE(typ,id) => {
                 vec.push(4);
                 vec.push(typ);
+                vec.push(id);
                 vec
             }
             DefaultResponse::ERRNOTEXT => {
@@ -698,9 +707,9 @@ impl Assembler<DefaultResponse> for DefaultResponse {
             match fragments[1].data[0] {
                 0 => {
                     if fragments[1].data[1] == 1 {
-                        Ok(DefaultResponse::REGISTERED(true))
+                        Ok(DefaultResponse::REGISTERED(true,fragments[1].data[2]))
                     } else {
-                        Ok(DefaultResponse::REGISTERED(false))
+                        Ok(DefaultResponse::REGISTERED(false,fragments[1].data[2]))
                     }
                 }
                 1 => {
@@ -792,7 +801,7 @@ impl Assembler<DefaultResponse> for DefaultResponse {
                 }
                 4 => {
                     if fragments[1].data[1] >= 1 && fragments[1].data[1] <= 3 {
-                        Ok(DefaultResponse::SERVERTYPE(fragments[1].data[1]))
+                        Ok(DefaultResponse::SERVERTYPE(fragments[1].data[1],fragments[1].data[2]))
                     } else {
                         Err("Error in getting the type".to_string())
                     }
@@ -1055,7 +1064,7 @@ pub fn serialize(datas: Vec<u8>) -> Vec<Fragment> {
 #[cfg(test)]
 mod test {
 
-    use std::{fs, io::Read};
+    use std::{fs::{self, File}, io::{BufRead, BufReader, Read}};
 
     use super::*;
 
@@ -1214,15 +1223,15 @@ mod test {
 
     #[test]
     fn test9() {
-        let dfrsp = DefaultResponse::REGISTERED(true);
+        let dfrsp = DefaultResponse::REGISTERED(true,1);
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
         let mut ser = serialize(fr.clone());
         let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
         if asmb.is_ok() {
             match asmb.ok().unwrap() {
-                DefaultResponse::REGISTERED(val) => match dfrsp.clone() {
-                    DefaultResponse::REGISTERED(v) => {
-                        assert_eq!(val, v);
+                DefaultResponse::REGISTERED(val,id) => match dfrsp.clone() {
+                    DefaultResponse::REGISTERED(v,id1) => {
+                        assert_eq!((val,id), (v,id1));
                         println!("Something went very wrong");
                     }
                     _ => {}
@@ -1264,17 +1273,25 @@ mod test {
         }
     }
 
+
+    fn read_file_to_lines(file_path: &str) -> Result<Vec<String>, std::io::Error> {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+    
+        // Handle potential errors when collecting lines
+        reader
+            .lines()
+            .collect::<Result<Vec<String>, std::io::Error>>() // Use `Result::collect` to handle errors
+    }
+
     #[test]
     fn test11() {
+
+        let file = read_file_to_lines("../../assets/test/text/test.txt").expect("Not Found");
+        
+
         let dfrsp: DefaultResponse = DefaultResponse::ALLMEDIALINKS(
-            [
-                "Hello".to_string(),
-                "world".to_string(),
-                "!".to_string(),
-                "Or".to_string(),
-                "Something like that".to_string(),
-            ]
-            .to_vec(),
+            file.clone()
         );
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
         let mut ser = serialize(fr);
@@ -1316,15 +1333,15 @@ mod test {
 
     #[test]
     fn test13() {
-        let dfrsp = DefaultResponse::SERVERTYPE(1);
+        let dfrsp = DefaultResponse::SERVERTYPE(1,12);
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
         let mut ser = serialize(fr);
         let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
         if asmb.is_ok() {
             match asmb.ok().unwrap() {
-                DefaultResponse::SERVERTYPE(val) => match dfrsp.clone() {
-                    DefaultResponse::SERVERTYPE(v) => {
-                        assert_eq!(val, v);
+                DefaultResponse::SERVERTYPE(val,id) => match dfrsp.clone() {
+                    DefaultResponse::SERVERTYPE(v,id1) => {
+                        assert_eq!((val,id),(v,id1));
                     }
                     _ => {}
                 },

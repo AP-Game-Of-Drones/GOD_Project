@@ -1,11 +1,10 @@
-use std::{collections::{HashMap, HashSet}, u64::MAX};
+use std::collections::{HashMap, HashSet};
 use wg_2024::{network::NodeId, packet::NodeType};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Node {
     value: NodeId,
     node_type: NodeType,
-    // pdr: f32, //only if the type is drone.
     pub adjacents: Vec<(NodeId, NodeType)>,
 }
 
@@ -28,8 +27,8 @@ impl Node {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Topology {
     nodes: HashMap<NodeId, Node>,
-    paths: Option<(Vec<Vec<NodeId>>, u64)>, // Updated to include weight
-    current_path: Option<(Vec<NodeId>, u64)>, // Current path and its weight
+    paths: Option<Vec<(Vec<NodeId>, u64)>>, // Stores paths and weights
+    current_path: Option<(Vec<NodeId>, u64)>, // Stores the selected path and weight
 }
 
 impl Topology {
@@ -40,12 +39,21 @@ impl Topology {
             current_path: None,
         }
     }
-    pub fn get_all_servers(&self)->Vec<NodeId>{
+
+    pub fn get_all_servers(&self) -> Vec<NodeId> {
         self.nodes
-        .values()
-        .filter(|node| node.node_type == NodeType::Server)
-        .map(|node| node.value)
-        .collect()
+            .values()
+            .filter(|node| node.node_type == NodeType::Server)
+            .map(|node| node.value)
+            .collect()
+    }
+
+    pub fn get_all_clients(&self) -> Vec<NodeId> {
+        self.nodes
+            .values()
+            .filter(|node| node.node_type == NodeType::Client)
+            .map(|node| node.value)
+            .collect()
     }
 
     pub fn update_topology(
@@ -53,52 +61,43 @@ impl Topology {
         initiator: (NodeId, NodeType),
         mut path_trace: Vec<(NodeId, NodeType)>,
     ) {
-        let mut path_trace_init = Vec::new();
         if !path_trace.contains(&initiator) {
-            path_trace_init.push(initiator);
-            path_trace_init.append(&mut path_trace);
-            path_trace.append(&mut path_trace_init);
+            path_trace.insert(0, initiator);
         }
-        let len = path_trace.len() - 1;
-        for value in 0..len + 1 {
-            if let Some(node) = self.nodes.get_mut(&path_trace[value].0) {
-                if value != len {
-                    node.add_adjacents(path_trace[value + 1].0, path_trace[value + 1].1);
-                }
-                if value != 0 {
-                    node.add_adjacents(path_trace[value - 1].0, path_trace[value - 1].1);
-                }
-            } else {
-                let mut node = Node::new(path_trace[value].0, path_trace[value].1);
-                if value != len {
-                    node.add_adjacents(path_trace[value + 1].0, path_trace[value + 1].1);
-                }
-                if value != 0 {
-                    node.add_adjacents(path_trace[value - 1].0, path_trace[value - 1].1);
-                }
-                self.nodes.insert(node.value, node);
+
+        let len = path_trace.len();
+        for (i, &(node_id, node_type)) in path_trace.iter().enumerate() {
+            let node = self.nodes.entry(node_id).or_insert_with(|| Node::new(node_id, node_type));
+
+            if i > 0 {
+                node.add_adjacents(path_trace[i - 1].0, path_trace[i - 1].1);
+            }
+            if i < len - 1 {
+                node.add_adjacents(path_trace[i + 1].0, path_trace[i + 1].1);
             }
         }
     }
 
     pub fn find_all_paths(&mut self, src: NodeId, dst: NodeId) {
-        self.paths = None; // Clear existing paths
         let mut visited = HashSet::new();
         let mut current_path = Vec::new();
         let mut all_paths = Vec::new();
 
-        // Start DFS traversal from the fixed source node
+        self.paths = Some(Vec::new()); // Reset paths
         self.dfs(src, dst, &mut visited, &mut current_path, &mut all_paths);
 
-        // Calculate weights for all paths (e.g., based on path length)
-        let weight = all_paths.iter().map(|path| path.len() as u64).sum();
+        if all_paths.is_empty() {
+            println!("⚠️ Warning: No paths found from {:?} to {:?}", src, dst);
+        }
 
-        // Sort paths by length
-        all_paths.sort_by_key(|path| path.len());
-        self.paths = Some((all_paths, weight));
+        self.paths = Some(
+            all_paths
+                .into_iter()
+                .map(|path| (path.clone(), path.len() as u64))
+                .collect(),
+        );
     }
 
-    /// Helper function to perform Depth-First Search
     fn dfs(
         &self,
         current: NodeId,
@@ -107,11 +106,13 @@ impl Topology {
         current_path: &mut Vec<NodeId>,
         all_paths: &mut Vec<Vec<NodeId>>,
     ) {
-        visited.insert(current);
+        if !visited.insert(current) {
+            return;
+        }
         current_path.push(current);
 
         if current == dst {
-            all_paths.push(current_path.clone()); // Add the path if the destination is reached
+            all_paths.push(current_path.clone());
         } else if let Some(node) = self.nodes.get(&current) {
             for &(neighbor_id, _) in &node.adjacents {
                 if !visited.contains(&neighbor_id) {
@@ -120,53 +121,47 @@ impl Topology {
             }
         }
 
-        // Backtrack
-        visited.remove(&current);
         current_path.pop();
+        visited.remove(&current);
     }
 
-    /// Updates the `current_path` by selecting one from the available paths based on length and weight
     pub fn update_current_path(&mut self) {
-        if let Some((paths, _)) = &self.paths {
-            if let Some(shortest_path) = paths.first() {
-                // For simplicity, set the weight as the path length
-                let weight = shortest_path.len() as u64;
-                self.current_path = Some((shortest_path.clone(), weight));
+        if let Some(paths) = &self.paths {
+            if let Some((shortest_path, weight)) = paths.first() {
+                self.current_path = Some((shortest_path.clone(), *weight));
             }
         }
     }
 
     pub fn set_path_based_on_dst(&mut self, dst: NodeId) {
-        if let Some((paths, w )) = &self.paths {
-            let mut current = MAX;
-            for path in paths {
-                if path[path.clone().len()-1]==dst{
-                    if *w<current {
-                        self.current_path=Some((path.clone(),*w));
-                        current=*w;
-                    }
-                }
-            }
+        if let Some(paths) = &self.paths {
+            let best_path = paths.iter().filter(|(path, _)| path.last() == Some(&dst))
+                .min_by_key(|(_, weight)| weight)
+                .cloned();
+
+            self.current_path = best_path.clone();
+
+            println!("Best path selected: {:?}", best_path);
+        } else {
+            println!("⚠️ No paths available to select for dst: {:?}", dst);
         }
     }
 
-    pub fn get_current_path(&self)->Vec<u8> {
-        self.current_path.clone().unwrap().0
+    pub fn get_current_path(&self) -> Option<Vec<NodeId>> {
+        self.current_path.as_ref().map(|(path, _)| path.clone())
     }
 
     pub fn increment_weights_for_node(&mut self, node_id: NodeId) {
-        // Update the weight of the `current_path`
         if let Some((current_path, weight)) = &mut self.current_path {
             if current_path.contains(&node_id) {
                 *weight += 1;
             }
         }
 
-        // Update the weights of all paths
-        if let Some((paths, total_weight)) = &mut self.paths {
-            for path in paths {
-                if path.contains(&node_id) {
-                    *total_weight += 1;
+        if let Some(paths) = &mut self.paths {
+            for path in paths.iter_mut() {
+                if path.0.contains(&node_id) {
+                    path.1 += 1;
                 }
             }
         }
@@ -177,41 +172,65 @@ impl Topology {
     }
 
     pub fn remove_node(&mut self, node_id: NodeId) {
-        // Remove the node from the topology
         if let Some(node) = self.nodes.remove(&node_id) {
-            // Remove the node from the adjacencies of its neighbors
             for &(neighbor_id, _) in &node.adjacents {
                 if let Some(neighbor) = self.nodes.get_mut(&neighbor_id) {
-                    // Remove the removed node from each neighbor's adjacency list
                     neighbor.adjacents.retain(|&(id, _)| id != node_id);
                 }
             }
 
-            // Now that the node is removed, we need to remove it from all paths that contain it
-            if let Some((paths, _)) = &mut self.paths {
-                // Retain paths that do not contain the node_id
-                paths.retain(|path| !path.contains(&node_id));
+            if let Some(paths) = &mut self.paths {
+                paths.retain(|(path, _)| !path.contains(&node_id));
             }
-
-            // Call `find_all_paths` to recompute the paths after removal
-            // For recomputation, you should pass the correct source and destination, here assuming node_id is both.
-            self.find_all_paths(node_id, node_id);
         }
     }
 
     pub fn get_neighbors(&self, node_id: NodeId) -> Option<Vec<NodeId>> {
-        if let Some(node) = self.nodes.get(&node_id) {
-            // Collecting the NodeIds of the neighbors
-            let neighbors: Vec<NodeId> = node
-                .adjacents
-                .iter()
-                .map(|(neighbor_id, _)| *neighbor_id)
-                .collect();
-            Some(neighbors)
+        self.nodes.get(&node_id).map(|node| node.adjacents.iter().map(|(id, _)| *id).collect())
+    }
+
+
+    pub fn find_one_path(&self, src: NodeId, dst: NodeId) -> Option<Vec<NodeId>> {
+        let mut visited = HashSet::new();
+        let mut path = Vec::new();
+
+        if self.dfs_find_one(src, dst, &mut visited, &mut path) {
+            Some(path)
         } else {
-            // If the node doesn't exist in the topology, return None
             None
         }
+    }
+
+    /// Helper DFS function to find a single path from `src` to `dst`
+    fn dfs_find_one(
+        &self,
+        current: NodeId,
+        dst: NodeId,
+        visited: &mut HashSet<NodeId>,
+        path: &mut Vec<NodeId>,
+    ) -> bool {
+        if !visited.insert(current) {
+            return false; // Node already visited, avoid cycles
+        }
+
+        path.push(current);
+
+        if current == dst {
+            return true; // Found the destination, return success
+        }
+
+        if let Some(node) = self.nodes.get(&current) {
+            for &(neighbor_id, _) in &node.adjacents {
+                if self.dfs_find_one(neighbor_id, dst, visited, path) {
+                    return true; // Found a valid path, stop searching
+                }
+            }
+        }
+
+        // Backtrack if no path found
+        path.pop();
+        visited.remove(&current);
+        false
     }
 }
 
@@ -256,9 +275,9 @@ mod tests {
 
         topology.find_all_paths(1, 2);
 
-        let paths = topology.paths.as_ref().unwrap().0.clone();
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0], vec![1, 2]);
+        let paths = topology.paths.as_ref().unwrap();
+        assert_eq!(paths[0].1, 2);
+        assert_eq!(paths[0].0, vec![1, 2]);
     }
 
     #[test]
