@@ -217,6 +217,8 @@ impl WebBrowser{
 
     fn send_from_web_client(&mut self ,dst:NodeId, msg: Message,)->Result<(()),String> {
         let bytes = deconstruct_message(msg.clone());
+        self.client_topology.find_all_paths(self.id,dst);
+        self.client_topology.set_path_based_on_dst(dst);
         match bytes {
             Ok(bytes_res) => {
                 let mut fragments: Vec<Fragment> = serialize(bytes_res);
@@ -285,6 +287,7 @@ impl WebBrowser{
         server_id: &u8,
         fragment_index: u64,
     ) -> Result<(()), &str> {
+        self.client_topology.find_all_paths(self.id,*server_id);
         self.client_topology.set_path_based_on_dst(*server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) =  traces {
@@ -313,6 +316,7 @@ impl WebBrowser{
         session_id: u64,
         fragment: Fragment,
     ) -> Result<(()), &str> {
+        self.client_topology.find_all_paths(self.id,server_id);
         self.client_topology.set_path_based_on_dst(server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) = traces { 
@@ -349,13 +353,15 @@ impl WebBrowser{
     pub fn handle_channels (&mut self, id: Option<NodeId>)  {
         let mut counter = 0;
         loop{
+            if counter == 100000 {
                 let mut session_id = rand_session_id();
                 while self.session_id_alredy_used(session_id){
                     session_id = rand_session_id();
                 }
                 let flood_id = generate_flood_id(&mut self.flood_ids);
                 self.send_new_flood_request(session_id, flood_id);
-            
+                println!("SENT {}",counter);
+            }
             counter+=1;
             select_biased! {
                 recv(self.packet_recv) -> packet_res => {
@@ -666,6 +672,7 @@ impl WebBrowser{
         src: NodeId,
         frag: &Fragment,
     ) -> Option<Message>{
+        self.client_topology.find_all_paths(self.id,src);
         self.client_topology.set_path_based_on_dst(src);
         self.send_ack(session_id, &src, frag.fragment_index).ok();
         if let Some(holder) = 
@@ -724,6 +731,7 @@ impl WebBrowser{
     }
     
     fn get_hops(&mut self, dst: u8)->Option<Vec<u8>> {
+        self.client_topology.find_all_paths(self.id,dst);
         self.client_topology.set_path_based_on_dst(dst);
         self.client_topology.get_current_path()
     }

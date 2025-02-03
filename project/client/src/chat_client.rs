@@ -105,38 +105,39 @@ impl ChatClient {
         self.current_server=Some(id);
     }
 
-    pub fn send_register(&mut self,dst:NodeId)->Result<(()),String> {
+    pub fn send_register(&mut self,dst:NodeId)->Result<(),String> {
         let new_req = Message::DefaultsRequest(DefaultsRequest::REGISTER);
         self.send_from_chat_client(dst, new_req)
     }
 
-    pub fn send_get_all_available(&mut self,dst:NodeId)->Result<(()),String>{
+    pub fn send_get_all_available(&mut self,dst:NodeId)->Result<(),String>{
         let new_req = Message::DefaultsRequest(DefaultsRequest::GETALLAVAILABLE);
         self.send_from_chat_client(dst,new_req)
     }
 
-    pub fn send_msg_to(&mut self,dst:NodeId, chat_msg: Message)->Result<(()),String>{
+    pub fn send_msg_to(&mut self,dst:NodeId, chat_msg: Message)->Result<(),String>{
         self.send_from_chat_client(dst, chat_msg)
     }
 
-    pub fn send_get_server_type(&mut self,dst:NodeId)->Result<(()),String>{
+    pub fn send_get_server_type(&mut self,dst:NodeId)->Result<(),String>{
         let new_req = Message::DefaultsRequest(DefaultsRequest::GETSERVERTYPE);
         self.send_from_chat_client(dst,new_req)
     }
 
-    fn send_from_chat_client(&mut self ,dst:NodeId, msg: Message,)->Result<(()),String> {
+    fn send_from_chat_client(&mut self ,dst:NodeId, msg: Message,)->Result<(),String> {
         let bytes = deconstruct_message(msg.clone());
         match bytes {
             Ok(bytes_res) => {
-                let mut fragments: Vec<Fragment> = serialize(bytes_res);
+                let fragments: Vec<Fragment> = serialize(bytes_res);
                 let mut session_id = 0;
                 while !self.session_id_alredy_used(session_id) {
                     session_id = rand_session_id();
                 }
+                self.client_topology.find_all_paths(self.id,dst);
                 self.client_topology.set_path_based_on_dst(dst);
-                let mut hops = self.get_hops(dst);
+                let hops = self.get_hops(dst);
                 println!("{:?}\n\n\n\n\n",hops.clone());
-                let mut packets = fragment_packetization(&mut fragments.clone(),  hops.clone(), session_id);
+                let packets = fragment_packetization(&mut fragments.clone(),  hops.clone(), session_id);
                 if !packets.is_empty(){
                     self.sent.insert(((session_id,self.id)), msg.clone());
                     self.holder_sent.insert((session_id,self.id),packets.clone());
@@ -219,22 +220,14 @@ impl ChatClient {
         }
     }
 
-    pub fn handle_channels (&mut self, id: Option<NodeId>)  {
-        let mut counter = 0;
+    pub fn handle_channels (&mut self)  {
         loop{
-                let mut session_id = rand_session_id();
-                while self.session_id_alredy_used(session_id){
-                    session_id = rand_session_id();
-                }
-                let flood_id = generate_flood_id(&mut self.flood_ids);
-                self.send_new_flood_request(session_id, flood_id).ok();
-            
-            counter+=1;
-            select_biased! {
+            select! {
                 recv(self.packet_recv) -> packet_res => {
                     if let Ok(packet) = packet_res {
                         match packet.clone().pack_type {
                             PacketType::Ack(ack) => {
+                                println!("REC ACK IN CHATCLIENT[{}]",self.id);
                                 match self.recv_ack_n_handle(packet.clone().routing_header.hops[0],packet.clone().session_id,ack.clone().fragment_index){
                                     Ok(_) => {
                                         println!("Handled Ack");
@@ -245,6 +238,7 @@ impl ChatClient {
                                 }
                             },
                             PacketType::Nack(nack) => {
+                                println!("REC NACK IN CHATCLIENT[{}]",self.id);
                                 match self.recv_nack_n_handle(packet.session_id, nack, &packet.clone()) {
                                     Ok(_) => {
                                         println!("Handled Nack");
@@ -255,7 +249,7 @@ impl ChatClient {
                                 }
                             },
                             PacketType::FloodRequest(f_request) => {
-                                println!("REC FLOODREQUEST IN {}",self.id);
+                                println!("REC FLOODREQUEST IN CHATCLIENT[{}]",self.id);
                                 match self.recv_flood_request_n_handle(packet.session_id, packet.clone(), &mut f_request.clone()) {
                                     Ok(_) => {
                                         println!("Handled FloodReq Client");
@@ -266,6 +260,7 @@ impl ChatClient {
                                 }
                             },
                             PacketType::FloodResponse(f_response) => {
+                                println!("REC FLOODRESPONSE IN CHATCLIENT[{}]",self.id);
                                 match self.recv_flood_response_n_handle(packet.session_id, &mut packet.clone(), f_response) {
                                     Ok(_) => {
                                         println!("{:?}\n\n",self.client_topology);
@@ -277,11 +272,12 @@ impl ChatClient {
                                 }
                             },
                             PacketType::MsgFragment(fragment) => {
+                                println!("REC MSGFRAGMENT IN CHATCLIENT[{}]",self.id);
                                 match self.recv_frag_n_handle(packet.session_id, packet.clone().routing_header.hops[0], &fragment) {
                                     Some(m) => {
                                         println!("Handled Frag");
                                         self.pre_processed=Some(((packet.session_id,packet.clone().routing_header.hops[0]),m.clone()));
-                                        let res = self.process_respsonse(m.clone(),packet.session_id,packet.clone().routing_header.hops[0]);
+                                        let _res = self.process_respsonse(m.clone(),packet.session_id,packet.clone().routing_header.hops[0]);
                                     },
                                     None => {
                                         println!("No message reconstructed yet");
@@ -297,12 +293,12 @@ impl ChatClient {
                          _=>{}   
                         }
                     } 
-                },
+                }
             }
         }
     }
 
-    pub fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64)->Result<(()),&str> {
+    pub fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64)->Result<(),&str> {
         if self.packet_send.is_empty(){
             Err("No neighbors in Client")
         } else {
@@ -320,10 +316,10 @@ impl ChatClient {
                         })
                     ){
                         Ok(_)=>{
-                            println!("Sent new flood_req");
+                            println!("Sent new flood_req from Client[{}]",self.id);
                         }, 
                         Err(_)=>{
-                            println!("Error_in_Sender");
+                            println!("Error_in_Sender from Client[{}] to Drone[{}]", self.id,neighbors.0);
                         }
                     }
             }
@@ -331,20 +327,23 @@ impl ChatClient {
         }
     }
 
-    fn send_flood_response(&mut self, session_id: u64, packet: &mut Packet) -> Result<(()), &str> {
-        if packet.routing_header.hops[packet.routing_header.hop_index-1] == self.id {
+    fn send_flood_response(&mut self, session_id: u64, packet: &mut Packet) -> Result<(), &str> {
+        if packet.routing_header.hops[packet.routing_header.hop_index] == self.id {
+
             if let Some(sender) = self
                 .packet_send
-                .get(&packet.routing_header.hops[packet.routing_header.hop_index])
+                .get(&packet.routing_header.hops[packet.routing_header.hop_index+1])
             {
+                packet.routing_header.hop_index+=1;
                 match sender.send(packet.clone()) {
-                    _=>{}
+                    Ok(_) =>{
+                        return Ok(());
+                    }
                     Err(_) => {return Err("Error in sender of client");}
                 }
             } else {
                 return Err("Error in routing");
             }
-            return Ok(());
         } else {
             return Err("Client not supposed to receive packet");
         }
@@ -355,7 +354,8 @@ impl ChatClient {
         session_id: u64,
         server_id: &u8,
         fragment_index: u64,
-    ) -> Result<(()), &str> {
+    ) -> Result<(), &str> {
+        self.client_topology.find_all_paths(self.id,*server_id);
         self.client_topology.set_path_based_on_dst(*server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) =  traces {
@@ -383,7 +383,8 @@ impl ChatClient {
         server_id: NodeId,
         session_id: u64,
         fragment: Fragment,
-    ) -> Result<(()), &str> {
+    ) -> Result<(), &str> {
+        self.client_topology.find_all_paths(self.id,server_id);
         self.client_topology.set_path_based_on_dst(server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) = traces { 
@@ -405,7 +406,7 @@ impl ChatClient {
         }
     }
 
-    fn send_new_packet(&mut self, packet: &Packet)->Result<(()),&str> {
+    fn send_new_packet(&mut self, packet: &Packet)->Result<(),&str> {
         if let Some(sender) = self.packet_send.get(&packet.routing_header.hops[1]){
             match self.packet_send.get(&packet.routing_header.hops[1]).unwrap().send(packet.clone()) {
                 Ok(_)=> Ok(()),
@@ -421,7 +422,7 @@ impl ChatClient {
         session_id: u64,
         packet: &mut Packet,
         flood_packet: FloodResponse,
-    ) -> Result<(()),&str>{
+    ) -> Result<(),&str>{
         if packet.routing_header.hops[packet.routing_header.hop_index] == self.id {
             self.client_topology
                 .update_topology((self.id, NodeType::Client), flood_packet.path_trace.clone());
@@ -439,7 +440,7 @@ impl ChatClient {
             println!("{:?}",packet.routing_header);
             packet.routing_header.hop_index+=1;
             println!("{:?}",packet.routing_header);
-            return self.send_flood_response(packet.session_id, &mut packet.clone());
+            return self.send_flood_response(session_id, packet);
         }
     }
 
@@ -448,9 +449,9 @@ impl ChatClient {
         session_id: u64,
         packet: Packet,
         flood_packet: &mut FloodRequest,
-    ) -> Result<(()),&str> {
+    ) -> Result<(),&str> {
         let mut path_trace  =  flood_packet.path_trace.clone();
-        path_trace.push((self.id,NodeType::Server));
+        path_trace.push((self.id,NodeType::Client));
         if self.flood_ids.contains(&flood_packet.flood_id) {
 
             let mut hops = path_trace.clone().into_iter().map(|(id,_)|id).collect::<Vec<u8>>();
@@ -459,8 +460,8 @@ impl ChatClient {
                 flood_id: flood_packet.flood_id,
                 path_trace: path_trace.clone()
             };
-            let new_packet = Packet::new_flood_response(SourceRoutingHeader::with_first_hop(hops.clone()), session_id,flood_response.clone());
-            return self.send_flood_response(session_id, &mut new_packet.clone());
+            let mut new_packet = Packet::new_flood_response(SourceRoutingHeader::with_first_hop(hops.clone()), session_id,flood_response.clone());
+            return self.send_flood_response(session_id, &mut new_packet);
         } else {
             self.flood_ids.insert(flood_packet.flood_id);
             for neigbor in self.packet_send.clone() {
@@ -469,7 +470,7 @@ impl ChatClient {
                     session_id, 
                     FloodRequest { 
                         flood_id: flood_packet.flood_id,
-                        initiator_id: path_trace.clone()[0].0,
+                        initiator_id: flood_packet.initiator_id,
                         path_trace: path_trace.clone() }
                     );
                     self.packet_send.get(&neigbor.0).unwrap().send(packet_new.clone()).ok();
@@ -480,7 +481,7 @@ impl ChatClient {
         }
     }
 
-    fn recv_nack_n_handle(&mut self, session_id: u64, nack: Nack, packet: &Packet) ->Result<(()),&str> {
+    fn recv_nack_n_handle(&mut self, session_id: u64, nack: Nack, packet: &Packet) ->Result<(),&str> {
         let flood_id = generate_flood_id(&mut self.flood_ids);
         let mut session = 0;
         while !self.session_id_alredy_used(session) {
@@ -652,6 +653,7 @@ impl ChatClient {
         src: NodeId,
         frag: &Fragment,
     ) -> Option<Message>{
+        self.client_topology.find_all_paths(self.id,src);
         self.client_topology.set_path_based_on_dst(src);
         self.send_ack(session_id, &src, frag.fragment_index).ok();
         if let Some(holder) = 
@@ -709,6 +711,7 @@ impl ChatClient {
     }
     
     fn get_hops(&mut self, dst: u8)->Option<Vec<u8>> {
+        self.client_topology.find_all_paths(self.id,dst);
         self.client_topology.update_current_path();
         self.client_topology.set_path_based_on_dst(dst);
         self.client_topology.get_current_path()
@@ -759,7 +762,7 @@ fn generate_flood_id(flood_ids: &mut HashSet<u64>) -> u64 {
     }
 }
 
-fn update_holder_rec(target: &mut Vec<u8>,data: &[u8], length: usize, key: (u64,NodeId), index: usize) {
+fn update_holder_rec(target: &mut Vec<u8>,data: &[u8], length: usize, _key: (u64,NodeId), index: usize) {
     let mut finish_pos = ((index-1) * 128)+ 1;
 
     // Handle special case for the first fragment
