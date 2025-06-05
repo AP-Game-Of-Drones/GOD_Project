@@ -1,0 +1,2 @@
+./assets/web/media/image/drone.png
+./assets/web/media/audio/track_1.mp3
