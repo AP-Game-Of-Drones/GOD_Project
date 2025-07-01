@@ -5,8 +5,7 @@ use std::{
 
 use bevy::prelude::*;
 use bevy_egui::{
-    EguiContexts, EguiPlugin,
-    egui::{self, ColorImage, TextureHandle},
+    egui::{self, Color32, ColorImage, RichText, TextureHandle}, EguiContexts, EguiPlugin
 };
 use crossbeam_channel::{Receiver, Sender};
 use image::DynamicImage;
@@ -159,6 +158,40 @@ pub fn ui_system(
 ) {
     let ctx = egui_ctx.ctx_mut();
 
+
+    egui::TopBottomPanel::bottom("no_match").show(ctx, |ui| {
+        if ui.button("Error in Requests").clicked(){
+            egui::Window::new("ErrorMessages")
+            .auto_sized()
+            .collapsible(true)
+            .auto_sized()
+            .show(&ctx,|ui|{
+                egui::ScrollArea::vertical().show(ui, |ui|{
+                    if let Some(client_id) = app_state.selected_source_client {
+                        if let Some(web_state) = app_state.browsers_states.get(&client_id) {
+                            for msg in web_state.web_pages.default.clone() {
+                                match msg {
+                                    DefaultResponse::ERRNOMEDIA | DefaultResponse::ERRNOTEXT =>{
+                                        ui.label(RichText::new("No match found for request of AllMediaLinks or AllTextLinks").color(Color32::RED));
+                                    },
+                                    _=>{}
+                                }
+                            }
+                            for msg in web_state.web_pages.content.clone() {
+                                match msg {
+                                    ContentResponse::NOMEDIAFOUND | ContentResponse::NOTEXTFOUND=>{
+                                        ui.label(RichText::new("No match found for request of Media or Text").color(Color32::RED));
+                                    },
+                                    _=>{}
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    });
+
     egui::SidePanel::left("left_panel").show(ctx, |ui| {
         ui.vertical(|ui| {
             ui.heading("Clients");
@@ -207,7 +240,7 @@ pub fn ui_system(
                                                                 ));
                                                         }
                                                     }
-                                                    if label.contains("/text/") {
+                                                    if label.contains("all_text") {
                                                         if let Some(server) = servers
                                                             .servers
                                                             .iter()
@@ -248,8 +281,30 @@ pub fn ui_system(
                                                     }
                                                 }
                                             }
-                                        }
+                                        },
                                         _ => {}
+                                    }
+                                }
+                                for msg in web_state.web_pages.content.clone() {
+                                    match msg {
+                                        ContentResponse::TEXT(links)=> {
+                                            // if let Some(server) = servers
+                                            //     .servers
+                                            //     .iter()
+                                            //     .find(|s| s.server_type == TEXTSERVER)
+                                            // {
+                                            //     let _ = channels
+                                            //         .channels
+                                            //         .get(&client_id)
+                                            //         .unwrap()
+                                            //         .sender
+                                            //         .send(WebCommand::GetText(
+                                            //             server.id,
+                                            //             label.clone(),
+                                            //         ));
+                                            // }
+                                        },
+                                        _=>{}
                                     }
                                 }
                             });
@@ -362,7 +417,6 @@ pub fn ui_system(
                                                     });
                                             }
                                         }
-                                        ContentResponse::TEXT(_txt) => {}
                                         _ => {}
                                     }
                                 }

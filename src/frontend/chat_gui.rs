@@ -20,7 +20,8 @@ use crate::{
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 
-const CHAT_PATH: &str = "./assets/chat/";
+include!(concat!(env!("OUT_DIR"), "/build_constants.rs"));
+const CHAT_PATH: &str = "/assets/chat/media/";
 pub fn main_gui(channels: HashMap<u8, GuiChannels>) {
     let (stream, handle) = rodio::OutputStream::try_default().unwrap();
     let rodio_player = Box::new(RodioPlayer {
@@ -38,10 +39,47 @@ pub fn main_gui(channels: HashMap<u8, GuiChannels>) {
         ))
         .insert_resource(GuiControllers::new(channels))
         .insert_resource(TextureCache::default())
-        .insert_resource(MyRodioHandle(rodio_player)) // <- Make sure it's added
+        .insert_resource(MyRodioHandle(rodio_player))
+        .insert_resource(Attachments::default()) // <- Make sure it's added
         .add_systems(Startup, setup)
         .add_systems(Update, ui_system)
         .run();
+}
+
+#[derive(Resource,Clone)]
+pub struct Attachments {
+    images: Vec<String>,
+    audio: Vec<String>,
+}
+
+impl Default for Attachments {
+    fn default() -> Self {
+        let mut images = Vec::new();
+        let mut audio = Vec::new();
+        let image_path = CHAT_PATH.to_string() + "image/";
+        let audio_path = CHAT_PATH.to_string() + "audio/";
+        if let Ok(reader) = fs::read_dir(image_path) {
+            for entry_res in reader {
+                if let Ok(entry) = entry_res {
+                    let file = entry.file_name();
+                    if let Some(file_name) = file.to_str() {
+                        images.push(file_name.to_string());
+                    }
+                }
+            }
+        }
+        if let Ok(reader) = fs::read_dir(audio_path) {
+            for entry_res in reader {
+                if let Ok(entry) = entry_res {
+                    let file = entry.file_name();
+                    if let Some(file_name) = file.to_str() {
+                        audio.push(file_name.to_string());
+                    }
+                }
+            }
+        }
+        Self { images, audio }
+    }
 }
 
 pub struct RodioPlayer {
@@ -129,6 +167,7 @@ pub struct ClientViewState {
     pub selected_client: Option<u8>,
     pub chat_pages: HashMap<u8, ChatPage>,
     pub input: HashMap<u8, String>,
+    attachments_state: bool,
 }
 
 #[derive(Resource, Default)]
@@ -165,6 +204,7 @@ pub fn ui_system(
     mut cache: ResMut<TextureCache>,
     channels: ResMut<GuiControllers>,
     mut rodio_player: ResMut<MyRodioHandle>,
+    attachments: Res<Attachments>,
 ) {
     let ctx = egui_ctx.ctx_mut();
 
@@ -360,71 +400,161 @@ pub fn ui_system(
                     ui.horizontal(|ui| {
                         ui.text_edit_singleline(text);
                         if ui.button("📎").clicked() {
-                            if let Some(file) =
-                                rfd::FileDialog::new().set_directory(CHAT_PATH).pick_file()
-                            {
-                                if let Some(server_id) = state.selected_server {
-                                    if let Some(str) = file.clone().to_str() {
-                                        if str.contains("image") {
-                                            let image =
-                                                image::open(file.clone()).expect("NOT OPENED");
-                                            let msg = ChatMessages::new_image_msg(
-                                                client_id,
-                                                server_id,
-                                                contact,
-                                                image.clone(),
-                                            );
-                                            let _ = channels
-                                                .channels
-                                                .get(&client_id)
-                                                .unwrap()
-                                                .sender
-                                                .send(ChatCommand::SendMessage(
-                                                    server_id,
-                                                    Message::ChatMessages(msg.clone()),
-                                                ));
-                                            let entry = state
-                                                .chat_pages
-                                                .entry(contact)
-                                                .or_insert_with(|| ChatPage {
-                                                    contact_id: contact,
-                                                    messages: Vec::new(),
-                                                });
-                                            entry.messages.push((int, SENT, msg));
-                                        }
-                                        if str.contains("audio") {
-                                            let data = fs::read(file.clone()).expect("NOT OPENED");
-                                            let audio = AudioSource {
-                                                bytes: Arc::from(data),
-                                            };
-                                            let msg = ChatMessages::new_audio_msg(
-                                                client_id,
-                                                server_id,
-                                                contact,
-                                                audio.clone(),
-                                            );
-                                            let _ = channels
-                                                .channels
-                                                .get(&client_id)
-                                                .unwrap()
-                                                .sender
-                                                .send(ChatCommand::SendMessage(
-                                                    server_id,
-                                                    Message::ChatMessages(msg.clone()),
-                                                ));
-                                            let entry = state
-                                                .chat_pages
-                                                .entry(contact)
-                                                .or_insert_with(|| ChatPage {
-                                                    contact_id: contact,
-                                                    messages: Vec::new(),
-                                                });
-                                            entry.messages.push((int, SENT, msg));
-                                        }
-                                    }
-                                }
-                            }
+                            state.attachments_state = true;
                         }
+                        if state.attachments_state {
+                            egui::Window::new("Attachments")
+                            .default_size(bevy_egui::egui::Vec2::new(400.,300.))
+                            .collapsible(true)
+                            .resizable(true)
+                            .show(ctx, |ui|{
+                                ui.columns(2, |columns| {
+                                    if let Some(server_id) = state.selected_server {
+                                        egui::ScrollArea::vertical()
+                                        .id_salt("Images")
+                                        .show(&mut columns[0], |ui|{
+                                            for img in &attachments.images {
+                                                ui.label(img.to_string());
+                                                if ui.button("Send").clicked() {
+                                                    let file_path=PROJECT_DIR.to_string() + CHAT_PATH + "image/" + img;
+                                                    let image =
+                                                        image::open(file_path).expect("NOT OPENED");
+                                                    let msg = ChatMessages::new_image_msg(
+                                                        client_id,
+                                                        server_id,
+                                                        contact,
+                                                        image.clone(),
+                                                    );
+                                                    let _ = channels
+                                                        .channels
+                                                        .get(&client_id)
+                                                        .unwrap()
+                                                        .sender
+                                                        .send(ChatCommand::SendMessage(
+                                                            server_id,
+                                                            Message::ChatMessages(msg.clone()),
+                                                        ));
+                                                    state.attachments_state=false;
+                                                    let entry = state
+                                                        .chat_pages
+                                                        .entry(contact)
+                                                        .or_insert_with(|| ChatPage {
+                                                            contact_id: contact,
+                                                            messages: Vec::new(),
+                                                        });
+                                                    entry.messages.push((int, SENT, msg));
+                                                    
+                                                }
+                                            }
+                                        });
+                                        egui::ScrollArea::vertical()
+                                        .id_salt("Images")
+                                        .show(&mut columns[1], |ui|{
+                                            for track in &attachments.audio {
+                                                ui.label(track.to_string());
+                                                if ui.button("Send").clicked() {
+                                                    let file_path = PROJECT_DIR.to_string() + CHAT_PATH + "audio/" + track;
+                                                    let data = fs::read(file_path).expect("NOT OPENED");
+                                                    let audio = AudioSource {
+                                                        bytes: Arc::from(data),
+                                                    };
+                                                    let msg = ChatMessages::new_audio_msg(
+                                                        client_id,
+                                                        server_id,
+                                                        contact,
+                                                        audio.clone(),
+                                                    );
+                                                    let _ = channels
+                                                        .channels
+                                                        .get(&client_id)
+                                                        .unwrap()
+                                                        .sender
+                                                        .send(ChatCommand::SendMessage(
+                                                            server_id,
+                                                            Message::ChatMessages(msg.clone()),
+                                                        ));
+                                                    state.attachments_state=false;
+                                                    let entry = state
+                                                        .chat_pages
+                                                        .entry(contact)
+                                                        .or_insert_with(|| ChatPage {
+                                                            contact_id: contact,
+                                                            messages: Vec::new(),
+                                                        });
+                                                    entry.messages.push((int, SENT, msg));
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            }); 
+
+                        }
+                        //     if let Some(file) =
+                        //         rfd::FileDialog::new().set_directory(CHAT_PATH).pick_file()
+                        //     {
+                        //         if let Some(server_id) = state.selected_server {
+                        //             if let Some(str) = file.clone().to_str() {
+                        //                 if str.contains("image") {
+                        //                     let image =
+                        //                         image::open(file.clone()).expect("NOT OPENED");
+                        //                     let msg = ChatMessages::new_image_msg(
+                        //                         client_id,
+                        //                         server_id,
+                        //                         contact,
+                        //                         image.clone(),
+                        //                     );
+                        //                     let _ = channels
+                        //                         .channels
+                        //                         .get(&client_id)
+                        //                         .unwrap()
+                        //                         .sender
+                        //                         .send(ChatCommand::SendMessage(
+                        //                             server_id,
+                        //                             Message::ChatMessages(msg.clone()),
+                        //                         ));
+                        //                     let entry = state
+                        //                         .chat_pages
+                        //                         .entry(contact)
+                        //                         .or_insert_with(|| ChatPage {
+                        //                             contact_id: contact,
+                        //                             messages: Vec::new(),
+                        //                         });
+                        //                     entry.messages.push((int, SENT, msg));
+                        //                 }
+                        //                 if str.contains("audio") {
+                        //                     let data = fs::read(file.clone()).expect("NOT OPENED");
+                        //                     let audio = AudioSource {
+                        //                         bytes: Arc::from(data),
+                        //                     };
+                        //                     let msg = ChatMessages::new_audio_msg(
+                        //                         client_id,
+                        //                         server_id,
+                        //                         contact,
+                        //                         audio.clone(),
+                        //                     );
+                        //                     let _ = channels
+                        //                         .channels
+                        //                         .get(&client_id)
+                        //                         .unwrap()
+                        //                         .sender
+                        //                         .send(ChatCommand::SendMessage(
+                        //                             server_id,
+                        //                             Message::ChatMessages(msg.clone()),
+                        //                         ));
+                        //                     let entry = state
+                        //                         .chat_pages
+                        //                         .entry(contact)
+                        //                         .or_insert_with(|| ChatPage {
+                        //                             contact_id: contact,
+                        //                             messages: Vec::new(),
+                        //                         });
+                        //                     entry.messages.push((int, SENT, msg));
+                        //                 }
+                        //             }
+                        //         }
+                        //     }
+                        // }
                         if ui.button("Send").clicked() {
                             if let Some(server_id) = state.selected_server {
                                 if !text.is_empty() {

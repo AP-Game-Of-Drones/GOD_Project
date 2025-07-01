@@ -107,7 +107,7 @@ impl ChatClient {
     fn send_from_chat_client(&mut self, dst: NodeId, msg: Message) -> Result<(), String> {
         match deconstruct_message(msg.clone()) {
             Ok(bytes_res) => {
-                let fragments: Vec<Fragment> = serialize(bytes_res);
+                let mut fragments: Vec<Fragment> = serialize(bytes_res);
                 let mut session_id = 0;
                 while self.session_id_alredy_used(session_id) {
                     session_id = rand_session_id();
@@ -116,7 +116,7 @@ impl ChatClient {
                 self.client_topology.set_path_based_on_dst(dst);
                 let hops = self.get_hops(dst);
                 let packets =
-                    fragment_packetization(&mut fragments.clone(), hops.clone(), session_id);
+                    fragment_packetization(&mut fragments, hops.clone(), session_id);
                 if !packets.is_empty() {
                     self.sent.insert((session_id, self.id), msg.clone());
                     self.holder_sent
@@ -124,7 +124,8 @@ impl ChatClient {
                     for pack in packets {
                         match self.send_new_packet(&pack.clone()) {
                             Ok(_) => {
-                                println!("Sent packet new in client");
+                                let _ = self.controller_send.send(NodeEvent::SentPacket(pack.clone()));
+                                // println!("Sent packet new in client");
                             }
                             Err(e) => {
                                 println!("{}", e);
@@ -151,14 +152,14 @@ impl ChatClient {
     ) -> Result<ProcessChatResults, ProcessChatResults> {
         if let Some(holder) = self.holder_sent.get_mut(&(session_id, self.id)) {
             holder.clear();
-            println!("Message packets inside of holder cleared");
+            // println!("Message packets inside of holder cleared");
         } else {
-            println!("Message id not inside of holder");
+            // println!("Message id not inside of holder");
         }
         match response {
             Message::DefaultResponse(df) => match df {
                 DefaultResponse::REGISTERED(res, id) => {
-                    println!("Received REGISTERED response");
+                    // println!("Received REGISTERED response");
                     if res {
                         self.registered_to.push(id);
                         let _ = self.send_get_all_available(id);
@@ -174,7 +175,7 @@ impl ChatClient {
                     }
                 }
                 DefaultResponse::SERVERTYPE(res, id) => {
-                    println!("Received SERVERTYPE response");
+                    // println!("Received SERVERTYPE response");
                     if res == CHATSERVER {
                         self.chat_servers.push(id);
                         // let _ = self.send_register(id);
@@ -185,7 +186,7 @@ impl ChatClient {
                     }
                 }
                 DefaultResponse::ALLAVAILABLE(res) => {
-                    println!("Received ALLAVAILABLE response");
+                    // println!("Received ALLAVAILABLE response");
                     let mut ids = Vec::new();
 
                     for client_id in res.clone() {
@@ -194,13 +195,13 @@ impl ChatClient {
                             ids.push(client_id);
                         }
                     }
-                    println!("Client_ids : {:?}\n\n", ids.clone());
+                    // println!("Client_ids : {:?}\n\n", ids.clone());
 
                     let _ = self.gui_event_sender.send(ChatEvent::Clients(res.clone()));
                     Ok(ProcessChatResults::CHATTERSFOUND)
                 }
                 DefaultResponse::ERRNOAVAILABLE => {
-                    println!("Received ERRNOAVAILABLE response");
+                    // println!("Received ERRNOAVAILABLE response");
                     Err(ProcessChatResults::NOCHATTERS)
                 }
                 _ => {
@@ -215,27 +216,27 @@ impl ChatClient {
                 Ok(ProcessChatResults::MSG)
             }
             Message::Audio(_) => {
-                println!("Audio Response");
+                // println!("Audio Response");
                 Err(ProcessChatResults::ERR)
             }
             Message::Image(_) => {
-                println!("Image Response");
+                // println!("Image Response");
                 Err(ProcessChatResults::ERR)
             }
             Message::String(_) => {
-                println!("String Response");
+                // println!("String Response");
                 Err(ProcessChatResults::ERR)
             }
             Message::ContentRequest(_) => {
-                println!("ContReq Response");
+                // println!("ContReq Response");
                 Err(ProcessChatResults::ERR)
             }
             Message::ContentResponse(_) => {
-                println!("Content Response");
+                // println!("Content Response");
                 Err(ProcessChatResults::ERR)
             }
             Message::DefaultsRequest(rsp) => {
-                println!("DefReq Response {:?}", rsp);
+                // println!("DefReq Response {:?}", rsp);
                 Err(ProcessChatResults::ERR)
             } // _ => {
               //     println!("No possible resp");
@@ -247,13 +248,13 @@ impl ChatClient {
     fn handle_packet(&mut self, packet: Packet) {
         match packet.clone().pack_type {
             PacketType::Ack(ack) => {
-                println!("REC ACK IN CHATCLIENT[{}]", self.id);
+                // println!("REC ACK IN CHATCLIENT[{}]", self.id);
                 match self.recv_ack_n_handle(
                     packet.clone().session_id,
                     ack.clone().fragment_index,
                 ) {
                     Ok(_) => {
-                        println!("Handled Ack");
+                        // println!("Handled Ack");
                     }
                     Err(e) => {
                         println!("{}", e);
@@ -261,10 +262,10 @@ impl ChatClient {
                 }
             }
             PacketType::Nack(nack) => {
-                println!("REC NACK IN CHATCLIENT[{}]", self.id);
+                // println!("REC NACK IN CHATCLIENT[{}]", self.id);
                 match self.recv_nack_n_handle(packet.session_id, nack, &packet.clone()) {
                     Ok(_) => {
-                        println!("Handled Nack");
+                        // println!("Handled Nack");
                     }
                     Err(e) => {
                         println!("{}", e);
@@ -272,13 +273,13 @@ impl ChatClient {
                 }
             }
             PacketType::FloodRequest(f_request) => {
-                println!("REC FLOODREQUEST IN CHATCLIENT[{}]", self.id);
+                // println!("REC FLOODREQUEST IN CHATCLIENT[{}]", self.id);
                 match self.recv_flood_request_n_handle(
                     packet.session_id,
                     &mut f_request.clone(),
                 ) {
                     Ok(_) => {
-                        println!("Handled FloodReq Client");
+                        // println!("Handled FloodReq Client");
                     }
                     Err(e) => {
                         println!("{}", e);
@@ -286,13 +287,13 @@ impl ChatClient {
                 }
             }
             PacketType::FloodResponse(f_response) => {
-                println!("REC FLOODRESPONSE IN CHATCLIENT[{}]", self.id);
+                // println!("REC FLOODRESPONSE IN CHATCLIENT[{}]", self.id);
                 match self.recv_flood_response_n_handle(
                     f_response,
                 ) {
                     Ok(_) => {
                         // println!("Client Topology [{}] : {:?}\n\n",self.id , self.client_topology);
-                        println!("Handled FloodResp in CL\n");
+                        // println!("Handled FloodResp in CL\n");
                     }
                     Err(e) => {
                         println!("Err: {}", e);
@@ -300,7 +301,7 @@ impl ChatClient {
                 }
             }
             PacketType::MsgFragment(fragment) => {
-                println!("REC MSGFRAGMENT IN CHATCLIENT[{}]", self.id);
+                // println!("REC MSGFRAGMENT IN CHATCLIENT[{}]", self.id);
                 // println!("Hops: {:?}",packet.clone().routing_header.hops);
                 match self.recv_frag_n_handle(
                     packet.session_id,
@@ -308,7 +309,7 @@ impl ChatClient {
                     &fragment,
                 ) {
                     Some(m) => {
-                        println!("Handled Frag in Client");
+                        // println!("Handled Frag in Client");
                         self.pre_processed = Some((
                             (packet.session_id, packet.clone().routing_header.hops[0]),
                             m.clone(),
@@ -320,7 +321,7 @@ impl ChatClient {
                         );
                     }
                     None => {
-                        println!("No message reconstructed yet");
+                        // println!("No message reconstructed yet");
                     }
                 }
             }
@@ -338,6 +339,16 @@ impl ChatClient {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
+                            // NodeCommand::ShortCut(packet)=>{
+                            //     self.handle_packet(packet);
+                            // },
+                            // NodeCommand::AddSender(id,sender)=>{
+                            //     self.packet_send.insert(id, sender);
+                            // },
+                            // NodeCommand::RemoveSender(id)=>{
+                            //     self.packet_send.remove(&id);
+                            //     self.client_topology.remove_node(id);
+                            // }
                             _=>{}
                         }
                     }
@@ -393,7 +404,7 @@ impl ChatClient {
                         },
                     )) {
                     Ok(_) => {
-                        println!("Sent new flood_req from Client[{}]", self.id);
+                        // println!("Sent new flood_req from Client[{}]", self.id);
                     }
                     Err(_) => {
                         println!(
@@ -568,7 +579,7 @@ impl ChatClient {
         match nack.clone().nack_type {
             NackType::DestinationIsDrone => {
                 //check route, it shouldn't happen if the routing was done right
-                println!("Dest is drone nacked");
+                // println!("Dest is drone nacked");
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
                     for p in packets.clone() {
                         match p.clone().pack_type {
@@ -609,7 +620,7 @@ impl ChatClient {
                 self.send_new_flood_request(session, flood_id).ok();
 
                 //update weight of the path used and change it there's one with less
-                println!("Dropped by drone nacked");
+                // println!("Dropped by drone nacked");
 
                 if let Some(fr) = { self.holder_sent.get(&(session_id, self.id)) } {
                     for p in fr.clone() {
@@ -636,7 +647,7 @@ impl ChatClient {
                 }
             }
             NackType::ErrorInRouting(id) => {
-                println!("Error in routing nacked");
+                // println!("Error in routing nacked");
 
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
                     //update the path since it might mean a drone has crashed or bad routing
@@ -673,7 +684,7 @@ impl ChatClient {
             }
             NackType::UnexpectedRecipient(id) => {
                 //shouldn't happen, if it happens update paths and update topology
-                println!("Unexpected rec nacked");
+                // println!("Unexpected rec nacked");
 
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)) } {
                     for p in packets.clone() {
@@ -784,11 +795,11 @@ impl ChatClient {
                             self.holder_rec.remove(&(session_id, src));
                             self.holder_frag_index.remove(&(session_id, src));
                             self.pre_processed = Some(((session_id, src), msg.clone()));
-                            println!("Message Reconstructed");
+                            // println!("Message Reconstructed");
                             return Some(msg.clone());
                         } else {
                             self.pre_processed = None;
-                            println!("Message reconstruction failed");
+                            // println!("Message reconstruction failed");
                             return None;
                         }
                     }
@@ -800,7 +811,7 @@ impl ChatClient {
                 (session_id, src),
                 vec![0; (frag.clone().total_n_fragments * 128) as usize],
             );
-            println!("Firsr frag received");
+            // println!("Firsr frag received");
             update_holder_rec(
                 &mut self.holder_rec.get_mut(&(session_id, src)).unwrap(),
                 &frag.data,
@@ -921,7 +932,7 @@ mod tests {
 
         match res {
             Ok(_) => {
-                println!("Sent");
+                // println!("Sent");
             }
             Err(e) => {
                 println!("{:?}", e);

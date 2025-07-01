@@ -18,12 +18,14 @@ use std::{
 };
 use wg_2024::{network::*, packet::*};
 
-const TEXTSERVER: u8 = 1;
-const MEDIASERVER: u8 = 2;
-const CHATSERVER: u8 = 3;
+pub const TEXTSERVER: u8 = 1;
+pub const MEDIASERVER: u8 = 2;
+pub const CHATSERVER: u8 = 3;
 
-const ALLTEXT: &str = "./assets/web/text/all_text_links.txt";
-const ALLMEDIA: &str = "./assets/web/text/all_media_links.txt";
+include!(concat!(env!("OUT_DIR"), "/build_constants.rs"));
+
+const ALLTEXT: &str = "/assets/web/text/all_text_links.txt";
+const ALLMEDIA: &str = "/assets/web/text/all_media_links.txt";
 
 pub trait Servers: Sized + Send + Sync {}
 impl Servers for Server {}
@@ -92,7 +94,7 @@ impl Server {
     }
 
     fn get_chatters(&self) -> Vec<NodeId> {
-        println!("\n\nGotChatters: {:?}\n\n", self.chatters.clone());
+        // println!("\n\nGotChatters: {:?}\n\n", self.chatters.clone());
         self.chatters.clone().into_iter().map(|id| id).collect()
     }
 
@@ -101,7 +103,7 @@ impl Server {
         match request.clone() {
             Message::DefaultsRequest(df) => match &df {
                 DefaultsRequest::GETSERVERTYPE => {
-                    println!("Received Type Request");
+                    // println!("Received Type Request");
                     self.send_from_server(
                         src_id,
                         Message::DefaultResponse(DefaultResponse::new_server_type_rsp(
@@ -134,7 +136,7 @@ impl Server {
                                 true, self.id,
                             )),
                         );
-                        println!("Chatters {:?}\n", self.chatters);
+                        // println!("Chatters {:?}\n", self.chatters);
                     } else {
                         self.send_from_server(
                             src_id,
@@ -146,7 +148,7 @@ impl Server {
                 }
                 DefaultsRequest::GETALLTEXT => {
                     if self.is_text_server() {
-                        let all_text = get_all(ALLTEXT);
+                        let all_text = get_all((PROJECT_DIR.to_string() + ALLTEXT).as_str());
                         self.send_from_server(
                             src_id,
                             Message::DefaultResponse(DefaultResponse::new_all_text_rsp(all_text)),
@@ -159,7 +161,7 @@ impl Server {
                     }
                 }
                 DefaultsRequest::GETALLMEDIALINKS => {
-                    let all_text = get_all(ALLMEDIA);
+                    let all_text = get_all((PROJECT_DIR.to_string() + ALLMEDIA).as_str());
                     info!("{:?}", all_text.clone());
                     if self.is_media_server() {
                         self.send_from_server(
@@ -285,10 +287,10 @@ impl Server {
                     if let Ok(packet) = packet_res {
                         match packet.clone().pack_type {
                             PacketType::Ack(ack) => {
-                                println!("REC ACK IN SERVER[{}]",self.id);
+                                // println!("REC ACK IN SERVER[{}]",self.id);
                                 match self.recv_ack_n_handle(packet.clone().session_id,ack.clone().fragment_index){
                                     Ok(_) => {
-                                        println!("Handled Ack");
+                                        // println!("Handled Ack");
                                     },
                                     Err(e) => {
                                         println!("{}",e);
@@ -296,10 +298,10 @@ impl Server {
                                 }
                             },
                             PacketType::Nack(nack) => {
-                                println!("REC NACK IN SERVER[{}]",self.id);
+                                // println!("REC NACK IN SERVER[{}]",self.id);
                                 match self.recv_nack_n_handle(packet.session_id, nack, &packet.clone()) {
                                     Ok(_) => {
-                                        println!("Handled Nack");
+                                        // println!("Handled Nack");
                                     },
                                     Err(e) => {
                                         println!("{}",e);
@@ -307,10 +309,10 @@ impl Server {
                                 }
                             },
                             PacketType::FloodRequest(f_request) => {
-                                println!("REC FLOODREQUEST IN SERVER[{}]",self.id);
+                                // println!("REC FLOODREQUEST IN SERVER[{}]",self.id);
                                 match self.recv_flood_request_n_handle(packet.session_id, &mut f_request.clone()) {
                                     Ok(_) => {
-                                        println!("Handled FloodReq in Server & Sent new Flood Response");
+                                        // println!("Handled FloodReq in Server & Sent new Flood Response");
                                     },
                                     Err(e) => {
                                         println!("{}",e);
@@ -318,12 +320,12 @@ impl Server {
                                 }
                             },
                             PacketType::FloodResponse(f_response) => {
-                                println!("REC FLOODRESPONSE IN SERVER[{}]",self.id);
+                                // println!("REC FLOODRESPONSE IN SERVER[{}]",self.id);
 
                                 match self.recv_flood_response_n_handle(f_response) {
                                     Ok(_) => {
                                         // println!("Server Topology: {:?}\n\n",self.server_topology);
-                                        println!("Handled FloodResp");
+                                        // println!("Handled FloodResp");
                                     },
                                     Err(e) => {
                                         println!("{}",e);
@@ -331,15 +333,15 @@ impl Server {
                                 }
                             },
                             PacketType::MsgFragment(fragment) => {
-                                println!("REC MSGFRAGMENT IN SERVER[{}]",self.id);
+                                // println!("REC MSGFRAGMENT IN SERVER[{}]",self.id);
                                 match self.recv_frag_n_handle(packet.session_id, packet.clone().routing_header.hops[0], &fragment) {
                                     Some(m) => {
-                                        println!("msg in server {} \n \n ",self.id);
+                                        // println!("msg in server {} \n \n ",self.id);
                                         self.pre_processed=Some(((packet.session_id,packet.clone().routing_header.hops[0]),m.clone()));
                                         self.handle_req(m.clone(), packet.clone().routing_header.hops[0], packet.session_id);
                                     },
                                     None => {
-                                        println!("No message reconstructed");
+                                        // println!("No message reconstructed");
                                     }
                                 }
                             }
@@ -384,7 +386,7 @@ impl Server {
                         },
                     )) {
                     Ok(_) => {
-                        println!("Sent new flood_req from server[{}]", self.id);
+                        // println!("Sent new flood_req from server[{}]", self.id);
                     }
                     Err(_) => {
                         println!(
@@ -555,9 +557,9 @@ impl Server {
             .into_iter()
             .map(|(id, _)| id)
             .collect::<Vec<u8>>();
-        println!("hops: {:?}", hops.clone());
+        // println!("hops: {:?}", hops.clone());
         hops.reverse();
-        println!("hops reversed: {:?}", hops.clone());
+        // println!("hops reversed: {:?}", hops.clone());
         let flood_response = FloodResponse {
             flood_id: flood_packet.flood_id,
             path_trace: path_trace.clone(),
@@ -567,7 +569,7 @@ impl Server {
             session_id,
             flood_response.clone(),
         );
-        println!("Flood Response: {:?}", new_packet.clone());
+        // println!("Flood Response: {:?}", new_packet.clone());
         return self.send_flood_response(&mut new_packet);
     }
 
@@ -779,7 +781,7 @@ impl Server {
         self.send_ack(session_id, &src, frag.fragment_index).ok();
         if let Some(holder) = self.holder_frag_index.get_mut(&(session_id, src)) {
             if !holder.contains(&frag.fragment_index) {
-                println!("Fragm n: 1  < n <  tot");
+                // println!("Fragm n: 1  < n <  tot");
                 let target = self.holder_rec.get_mut(&(session_id, src)).unwrap();
                 update_holder_rec(
                     target,
@@ -790,7 +792,7 @@ impl Server {
                 );
                 holder.push(frag.fragment_index);
 
-                print!("{} {}\n\n\n", holder.len(), frag.total_n_fragments);
+                // print!("{} {}\n\n\n", holder.len(), frag.total_n_fragments);
                 if holder.len() == (frag.total_n_fragments) as usize {
                     if let Some(mut data) = self.holder_rec.get_mut(&(session_id, src)) {
                         remove_trailing_zeros(&mut data);
@@ -804,11 +806,11 @@ impl Server {
                             self.holder_rec.remove(&(session_id, src));
                             self.holder_frag_index.remove(&(session_id, src));
                             self.pre_processed = Some(((session_id, src), msg.clone()));
-                            println!("Message Reconstructed");
+                            // println!("Message Reconstructed");
                             return Some(msg.clone());
                         } else {
                             self.pre_processed = None;
-                            println!("Message reconstruction failed");
+                            // println!("Message reconstruction failed");
                             return None;
                         }
                     }
@@ -820,7 +822,7 @@ impl Server {
                 (session_id, src),
                 vec![0; (frag.clone().total_n_fragments * 128) as usize],
             );
-            println!("First frag received");
+            // println!("First frag received");
             update_holder_rec(
                 &mut self.holder_rec.get_mut(&(session_id, src)).unwrap(),
                 &frag.data,
