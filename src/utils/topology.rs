@@ -327,7 +327,6 @@ mod tests {
         topology.add_node(node2);
 
         topology.find_all_paths(1, 2);
-        topology.update_current_path();
 
         // Increment weight for a node in the path
         topology.increment_weights_for_node(1);

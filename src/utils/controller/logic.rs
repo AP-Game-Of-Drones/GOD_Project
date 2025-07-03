@@ -231,3 +231,16 @@ pub fn set_pdr(simulation_controller: &mut SimulationController, id: u8, pdr: f3
         }
     }
 }
+
+
+pub fn shortcut(simulation_controller: &mut SimulationController, packet: Packet) {
+    let rec_id = packet.routing_header.hops[packet.routing_header.hops.len() - 1];
+    match simulation_controller.sender_node_packet.get(&rec_id).unwrap().send(packet) {
+        Ok(_)=>{
+            info!("Sent packet to node {} wit a shortcut",rec_id,);
+        },
+        Err(_)=>{
+            warn!("crash to {} error",rec_id);
+        }
+    }
+}

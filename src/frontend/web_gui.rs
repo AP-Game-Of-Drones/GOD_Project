@@ -9,7 +9,7 @@ use crossbeam_channel::{Receiver, Sender};
 use image::DynamicImage;
 
 use crate::{
-    frontend::{WebCommand, WebEvent},
+    frontend::{MainState, WebCommand, WebEvent},
     utils::fragmentation_handling::{ContentResponse, DefaultResponse},
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
@@ -176,102 +176,126 @@ pub fn ui_system(
     mut rodio_player: ResMut<MyRodioHandle>,
     mut servers: ResMut<ServerPanel>,
     mut media_viewer: ResMut<MediaViewer>,
+    state: Res<MainState>,
 ) {
     let ctx = egui_ctx.ctx_mut();
-
-    egui::TopBottomPanel::bottom("no_match").show(ctx, |ui| {
-        if ui.button("Error in Requests").clicked(){
-            egui::Window::new("ErrorMessages")
-            .auto_sized()
-            .collapsible(true)
-            .auto_sized()
-            .show(&ctx,|ui|{
-                egui::ScrollArea::vertical().show(ui, |ui|{
-                    if let Some(client_id) = app_state.selected_source_client {
-                        if let Some(web_state) = app_state.browsers_states.get(&client_id) {
-                            for msg in web_state.web_pages.default.clone() {
-                                match msg {
-                                    DefaultResponse::ERRNOMEDIA | DefaultResponse::ERRNOTEXT =>{
-                                        ui.label(RichText::new("No match found for request of AllMediaLinks or AllTextLinks").color(Color32::RED));
-                                    },
-                                    _=>{}
+    if let MainState::Web = *state {
+        egui::TopBottomPanel::bottom("no_match").show(ctx, |ui| {
+            if ui.button("Error in Requests").clicked(){
+                egui::Window::new("ErrorMessages")
+                .auto_sized()
+                .collapsible(true)
+                .auto_sized()
+                .show(&ctx,|ui|{
+                    egui::ScrollArea::vertical().show(ui, |ui|{
+                        if let Some(client_id) = app_state.selected_source_client {
+                            if let Some(web_state) = app_state.browsers_states.get(&client_id) {
+                                for msg in web_state.web_pages.default.clone() {
+                                    match msg {
+                                        DefaultResponse::ERRNOMEDIA | DefaultResponse::ERRNOTEXT =>{
+                                            ui.label(RichText::new("No match found for request of AllMediaLinks or AllTextLinks").color(Color32::RED));
+                                        },
+                                        _=>{}
+                                    }
                                 }
-                            }
-                            for msg in web_state.web_pages.content.clone() {
-                                match msg {
-                                    ContentResponse::NOMEDIAFOUND | ContentResponse::NOTEXTFOUND=>{
-                                        ui.label(RichText::new("No match found for request of Media or Text").color(Color32::RED));
-                                    },
-                                    _=>{}
+                                for msg in web_state.web_pages.content.clone() {
+                                    match msg {
+                                        ContentResponse::NOMEDIAFOUND | ContentResponse::NOTEXTFOUND=>{
+                                            ui.label(RichText::new("No match found for request of Media or Text").color(Color32::RED));
+                                        },
+                                        _=>{}
+                                    }
                                 }
                             }
                         }
-                    }
+                    });
                 });
-            });
-        }
-    });
-
-    egui::SidePanel::left("left_panel").show(ctx, |ui| {
-        ui.vertical(|ui| {
-            ui.heading("Clients");
-            for (id, gui_c) in &channels.channels {
-                if !app_state.browsers_states.contains_key(&id) {
-                    app_state
-                        .browsers_states
-                        .insert(*id, WebViewState::default());
-                }
-                if ui.button(format!("WebClient {}", id)).clicked() {
-                    app_state.selected_source_client = Some(*id);
-                    app_state.browsers_states.entry(*id).or_default();
-                    let _ = gui_c.sender.send(WebCommand::GetServersType);
-                }
             }
         });
-    });
-
-    egui::CentralPanel::default().show(ctx, |ui| {
-        if let Some(client_id) = app_state.selected_source_client {
-            if let Some(web_state) = app_state.browsers_states.get(&client_id) {
-                ui.columns(2, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("first scroll area")
-                        .show(&mut ui[0], |ui| {
-                            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                for msg in web_state.web_pages.default.clone() {
-                                    match msg {
-                                        DefaultResponse::ALLTEXT(vec) => {
-                                            for label in vec {
-                                                ui.label(label.clone());
-                                                if ui.button("->").clicked() {
-                                                    if label.contains("all_media") {
-                                                        if let Some(server) = servers
-                                                            .servers
-                                                            .iter()
-                                                            .find(|s| s.server_type == MEDIASERVER)
-                                                        {
-                                                            let _ = channels
-                                                                .channels
-                                                                .get(&client_id)
-                                                                .unwrap()
-                                                                .sender
-                                                                .send(WebCommand::GetAllMedia(
-                                                                    server.id,
-                                                                ));
+    
+        egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.heading("Clients");
+                for (id, gui_c) in &channels.channels {
+                    if !app_state.browsers_states.contains_key(&id) {
+                        app_state
+                            .browsers_states
+                            .insert(*id, WebViewState::default());
+                    }
+                    if ui.button(format!("WebClient {}", id)).clicked() {
+                        app_state.selected_source_client = Some(*id);
+                        app_state.browsers_states.entry(*id).or_default();
+                        let _ = gui_c.sender.send(WebCommand::GetServersType);
+                    }
+                }
+            });
+        });
+    
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if let Some(client_id) = app_state.selected_source_client {
+                if let Some(web_state) = app_state.browsers_states.get(&client_id) {
+                    ui.columns(2, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("first scroll area")
+                            .show(&mut ui[0], |ui| {
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                    for msg in web_state.web_pages.default.clone() {
+                                        match msg {
+                                            DefaultResponse::ALLTEXT(vec) => {
+                                                for label in vec {
+                                                    ui.label(label.clone());
+                                                    if ui.button("->").clicked() {
+                                                        if label.contains("all_media") {
+                                                            if let Some(server) = servers
+                                                                .servers
+                                                                .iter()
+                                                                .find(|s| s.server_type == MEDIASERVER)
+                                                            {
+                                                                let _ = channels
+                                                                    .channels
+                                                                    .get(&client_id)
+                                                                    .unwrap()
+                                                                    .sender
+                                                                    .send(WebCommand::GetAllMedia(
+                                                                        server.id,
+                                                                    ));
+                                                            }
+                                                        }
+                                                        if label.contains("all_text") {
+                                                            if let Some(server) = servers
+                                                                .servers
+                                                                .iter()
+                                                                .find(|s| s.server_type == TEXTSERVER)
+                                                            {
+                                                                let _ = channels
+                                                                    .channels
+                                                                    .get(&client_id)
+                                                                    .unwrap()
+                                                                    .sender
+                                                                    .send(WebCommand::GetText(
+                                                                        server.id,
+                                                                        label.clone(),
+                                                                    ));
+                                                            }
                                                         }
                                                     }
-                                                    if label.contains("all_text") {
-                                                        if let Some(server) = servers
-                                                            .servers
-                                                            .iter()
-                                                            .find(|s| s.server_type == TEXTSERVER)
-                                                        {
+                                                }
+                                            }
+                                            DefaultResponse::ALLMEDIALINKS(vec) => {
+                                                for label in vec {
+                                                    ui.label(label.clone());
+                                                    if let Some(server) = servers
+                                                        .servers
+                                                        .iter()
+                                                        .find(|s| s.server_type == MEDIASERVER)
+                                                    {
+                                                        if ui.button("->").clicked() {
                                                             let _ = channels
                                                                 .channels
                                                                 .get(&client_id)
                                                                 .unwrap()
                                                                 .sender
-                                                                .send(WebCommand::GetText(
+                                                                .send(WebCommand::GetMedia(
                                                                     server.id,
                                                                     label.clone(),
                                                                 ));
@@ -279,204 +303,181 @@ pub fn ui_system(
                                                     }
                                                 }
                                             }
+                                            _ => {}
                                         }
-                                        DefaultResponse::ALLMEDIALINKS(vec) => {
-                                            for label in vec {
-                                                ui.label(label.clone());
-                                                if let Some(server) = servers
-                                                    .servers
-                                                    .iter()
-                                                    .find(|s| s.server_type == MEDIASERVER)
-                                                {
-                                                    if ui.button("->").clicked() {
-                                                        let _ = channels
-                                                            .channels
-                                                            .get(&client_id)
-                                                            .unwrap()
-                                                            .sender
-                                                            .send(WebCommand::GetMedia(
-                                                                server.id,
-                                                                label.clone(),
-                                                            ));
-                                                    }
-                                                }
+                                    }
+                                    for msg in web_state.web_pages.content.clone() {
+                                        match msg {
+                                            ContentResponse::TEXT(links) => {
+                                                // if let Some(server) = servers
+                                                //     .servers
+                                                //     .iter()
+                                                //     .find(|s| s.server_type == TEXTSERVER)
+                                                // {
+                                                //     let _ = channels
+                                                //         .channels
+                                                //         .get(&client_id)
+                                                //         .unwrap()
+                                                //         .sender
+                                                //         .send(WebCommand::GetText(
+                                                //             server.id,
+                                                //             label.clone(),
+                                                //         ));
+                                                // }
                                             }
+                                            _ => {}
                                         }
-                                        _ => {}
                                     }
-                                }
-                                for msg in web_state.web_pages.content.clone() {
-                                    match msg {
-                                        ContentResponse::TEXT(links) => {
-                                            // if let Some(server) = servers
-                                            //     .servers
-                                            //     .iter()
-                                            //     .find(|s| s.server_type == TEXTSERVER)
-                                            // {
-                                            //     let _ = channels
-                                            //         .channels
-                                            //         .get(&client_id)
-                                            //         .unwrap()
-                                            //         .sender
-                                            //         .send(WebCommand::GetText(
-                                            //             server.id,
-                                            //             label.clone(),
-                                            //         ));
-                                            // }
-                                        }
-                                        _ => {}
-                                    }
-                                }
+                                });
                             });
-                        });
-                    egui::ScrollArea::vertical()
-                        .id_salt("second scroll area")
-                        .show(&mut ui[1], |ui| {
-                            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                for msg in web_state.web_pages.content.clone() {
-                                    match msg {
-                                        ContentResponse::MEDIAIMAGE(img) => {
-                                            let id = img_hash(&img);
-                                            let texture =
-                                                handle_incoming_image(&img, ctx, &mut cache, id);
-                                            if ui.button("📷").clicked() {
-                                                media_viewer.open = true;
-                                                media_viewer.current_image_id = Some(id); // <-- your actual image ID here
-                                            }
-                                            if media_viewer.open
-                                                && media_viewer.current_image_id.is_some()
-                                            {
-                                                egui::Window::new("Image Viewer")
-                                                    .collapsible(false)
-                                                    .resizable(true)
-                                                    .default_size([300.0, 300.0])
-                                                    .show(ctx, |ui| {
-                                                        if let Some(id) =
-                                                            media_viewer.current_image_id
-                                                        {
-                                                            if let Some(_d_texture) =
-                                                                cache.map.get(&id)
+                        egui::ScrollArea::vertical()
+                            .id_salt("second scroll area")
+                            .show(&mut ui[1], |ui| {
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                    for msg in web_state.web_pages.content.clone() {
+                                        match msg {
+                                            ContentResponse::MEDIAIMAGE(img) => {
+                                                let id = img_hash(&img);
+                                                let texture =
+                                                    handle_incoming_image(&img, ctx, &mut cache, id);
+                                                if ui.button("📷").clicked() {
+                                                    media_viewer.open = true;
+                                                    media_viewer.current_image_id = Some(id); // <-- your actual image ID here
+                                                }
+                                                if media_viewer.open
+                                                    && media_viewer.current_image_id.is_some()
+                                                {
+                                                    egui::Window::new("Image Viewer")
+                                                        .collapsible(false)
+                                                        .resizable(true)
+                                                        .default_size([300.0, 300.0])
+                                                        .show(ctx, |ui| {
+                                                            if let Some(id) =
+                                                                media_viewer.current_image_id
                                                             {
-                                                                let size = texture.size_vec2();
-                                                                ui.add(
-                                                                    egui::Image::new(&texture)
-                                                                        .fit_to_exact_size(size),
-                                                                );
-                                                            } else {
-                                                                ui.label(
-                                                                    "Image not found in cache.",
-                                                                );
-                                                            }
-                                                        }
-
-                                                        if ui.button("❌ Close").clicked() {
-                                                            media_viewer.open = false;
-                                                            media_viewer.current_image_id = None;
-                                                        }
-                                                    });
-                                            }
-                                        }
-                                        ContentResponse::MEDIAUDIO(track) => {
-                                            let i = audio_hash(&track);
-                                            if ui.button("🎙️").clicked() {
-                                                media_viewer.open = true;
-                                                media_viewer.current_audio_id = Some(i); // <-- your actual image ID here
-                                            }
-                                            if media_viewer.open
-                                                && media_viewer.current_audio_id.is_some()
-                                            {
-                                                egui::Window::new("Audio")
-                                                    .collapsible(false)
-                                                    .resizable(true)
-                                                    .default_size([100.0, 300.0])
-                                                    .show(ctx, |ui| {
-                                                        if ui.button("▶ Play").clicked() {
-                                                            if let Some(track_bytes) =
-                                                                Some(&track.bytes)
-                                                            {
-                                                                let cursor = Cursor::new(
-                                                                    track_bytes.clone(),
-                                                                );
-                                                                if let Ok(source) =
-                                                                    Decoder::new(cursor)
+                                                                if let Some(_d_texture) =
+                                                                    cache.map.get(&id)
                                                                 {
-                                                                    if let Ok(sink) = Sink::try_new(
-                                                                        &rodio_player.0.handle,
-                                                                    ) {
-                                                                        sink.append(source);
-                                                                        rodio_player
-                                                                            .0
-                                                                            .sinks
-                                                                            .insert(i, sink);
-                                                                    }
+                                                                    let size = texture.size_vec2();
+                                                                    ui.add(
+                                                                        egui::Image::new(&texture)
+                                                                            .fit_to_exact_size(size),
+                                                                    );
                                                                 } else {
-                                                                    error!(
-                                                                        "Failed to decode audio"
+                                                                    ui.label(
+                                                                        "Image not found in cache.",
                                                                     );
                                                                 }
                                                             }
-                                                        }
-                                                        if ui.button("⏸ Pause").clicked() {
-                                                            if let Some(sink) =
-                                                                rodio_player.0.sinks.get(&i)
-                                                            {
-                                                                sink.pause();
+                                                        
+                                                            if ui.button("❌ Close").clicked() {
+                                                                media_viewer.open = false;
+                                                                media_viewer.current_image_id = None;
                                                             }
-                                                        }
-                                                        if ui.button("⏹ Stop").clicked() {
-                                                            if let Some(sink) =
-                                                                rodio_player.0.sinks.remove(&i)
-                                                            {
-                                                                sink.stop();
-                                                            }
-                                                        }
-                                                        if ui.button("❌ Close").clicked() {
-                                                            media_viewer.open = false;
-                                                            media_viewer.current_audio_id = None;
-                                                        }
-                                                    });
+                                                        });
+                                                }
                                             }
+                                            ContentResponse::MEDIAUDIO(track) => {
+                                                let i = audio_hash(&track);
+                                                if ui.button("🎙️").clicked() {
+                                                    media_viewer.open = true;
+                                                    media_viewer.current_audio_id = Some(i); // <-- your actual image ID here
+                                                }
+                                                if media_viewer.open
+                                                    && media_viewer.current_audio_id.is_some()
+                                                {
+                                                    egui::Window::new("Audio")
+                                                        .collapsible(false)
+                                                        .resizable(true)
+                                                        .default_size([100.0, 300.0])
+                                                        .show(ctx, |ui| {
+                                                            if ui.button("▶ Play").clicked() {
+                                                                if let Some(track_bytes) =
+                                                                    Some(&track.bytes)
+                                                                {
+                                                                    let cursor = Cursor::new(
+                                                                        track_bytes.clone(),
+                                                                    );
+                                                                    if let Ok(source) =
+                                                                        Decoder::new(cursor)
+                                                                    {
+                                                                        if let Ok(sink) = Sink::try_new(
+                                                                            &rodio_player.0.handle,
+                                                                        ) {
+                                                                            sink.append(source);
+                                                                            rodio_player
+                                                                                .0
+                                                                                .sinks
+                                                                                .insert(i, sink);
+                                                                        }
+                                                                    } else {
+                                                                        error!(
+                                                                            "Failed to decode audio"
+                                                                        );
+                                                                    }
+                                                                }
+                                                            }
+                                                            if ui.button("⏸ Pause").clicked() {
+                                                                if let Some(sink) =
+                                                                    rodio_player.0.sinks.get(&i)
+                                                                {
+                                                                    sink.pause();
+                                                                }
+                                                            }
+                                                            if ui.button("⏹ Stop").clicked() {
+                                                                if let Some(sink) =
+                                                                    rodio_player.0.sinks.remove(&i)
+                                                                {
+                                                                    sink.stop();
+                                                                }
+                                                            }
+                                                            if ui.button("❌ Close").clicked() {
+                                                                media_viewer.open = false;
+                                                                media_viewer.current_audio_id = None;
+                                                            }
+                                                        });
+                                                }
+                                            }
+                                            _ => {}
                                         }
-                                        _ => {}
                                     }
-                                }
+                                });
                             });
-                        });
-                });
+                    });
+                }
             }
-        }
-    });
-
-    egui::SidePanel::right("Text and Media").show(ctx, |ui| {
-        if let Some(client_id) = app_state.selected_source_client {
-            if ui.button("GET MEDIA LINKS").clicked() {
-                for s in servers.servers.clone() {
-                    if s.server_type == MEDIASERVER {
-                        let _ = channels
-                            .channels
-                            .get(&client_id)
-                            .unwrap()
-                            .sender
-                            .send(WebCommand::GetAllMedia(s.id));
+        });
+    
+        egui::SidePanel::right("Text and Media").show(ctx, |ui| {
+            if let Some(client_id) = app_state.selected_source_client {
+                if ui.button("GET MEDIA LINKS").clicked() {
+                    for s in servers.servers.clone() {
+                        if s.server_type == MEDIASERVER {
+                            let _ = channels
+                                .channels
+                                .get(&client_id)
+                                .unwrap()
+                                .sender
+                                .send(WebCommand::GetAllMedia(s.id));
+                        }
+                    }
+                }
+                ui.separator();
+                if ui.button("GET TEXTS LINKS").clicked() {
+                    for s in servers.servers.clone() {
+                        if s.server_type == TEXTSERVER {
+                            let _ = channels
+                                .channels
+                                .get(&client_id)
+                                .unwrap()
+                                .sender
+                                .send(WebCommand::GetAllText(s.id));
+                        }
                     }
                 }
             }
-            ui.separator();
-            if ui.button("GET TEXTS LINKS").clicked() {
-                for s in servers.servers.clone() {
-                    if s.server_type == TEXTSERVER {
-                        let _ = channels
-                            .channels
-                            .get(&client_id)
-                            .unwrap()
-                            .sender
-                            .send(WebCommand::GetAllText(s.id));
-                    }
-                }
-            }
-        }
-    });
-
+        });
+    }
     if let Some(cli) = app_state.selected_source_client {
         while let Ok(event) = channels.channels.get(&cli).unwrap().receiver.try_recv() {
             if let Some(view) = app_state.browsers_states.get_mut(&cli) {

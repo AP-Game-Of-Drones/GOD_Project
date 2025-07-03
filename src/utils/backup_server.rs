@@ -441,9 +441,9 @@ impl Server {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
-                            NodeCommand::PacketShortcut(packet)=>{
-                                self.handle_packet(packet.clone());
-                            },
+                            // NodeCommand::PacketShortcut(packet)=>{
+                            //     self.handle_packet(packet.clone());
+                            // },
                             NodeCommand::AddSender(id,sender)=>{
                                 self.packet_send.insert(id, sender);
                             },
@@ -700,7 +700,6 @@ impl Server {
                                 if f.fragment_index == nack.fragment_index {
                                     self.server_topology
                                         .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    self.server_topology.update_current_path();
                                     return self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
@@ -712,7 +711,6 @@ impl Server {
                                 if a.fragment_index == nack.fragment_index {
                                     self.server_topology
                                         .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    self.server_topology.update_current_path();
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -735,14 +733,13 @@ impl Server {
                     for p in fr.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
-                                info!(
-                                    "FragmentIndex {} NAckIndex{}: Line->639",
-                                    f.fragment_index, nack.fragment_index
-                                );
                                 if f.fragment_index == nack.fragment_index {
+                                    info!(
+                                        "FragmentIndex {} == NackIndex{}: Dropped-> Resend",
+                                        f.fragment_index, nack.fragment_index
+                                    );
                                     self.server_topology
                                         .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    self.server_topology.update_current_path();
                                     return self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
@@ -765,7 +762,6 @@ impl Server {
                     self.server_topology.remove_node(id);
                     //update the path since it might mean a drone has crashed or bad routing
                     self.server_topology.increment_weights_for_node(id);
-                    self.server_topology.update_current_path();
                     for p in packets.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
@@ -805,7 +801,6 @@ impl Server {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.server_topology.increment_weights_for_node(id);
-                                    self.server_topology.update_current_path();
                                     return self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
@@ -816,7 +811,6 @@ impl Server {
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
                                     self.server_topology.increment_weights_for_node(id);
-                                    self.server_topology.update_current_path();
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -847,8 +841,8 @@ impl Server {
                 let mut i = 0;
                 for f in holder.clone() {
                     match f.pack_type {
-                        PacketType::Ack(a) => {
-                            if a.fragment_index == fragment_index {
+                        PacketType::MsgFragment(f) => {
+                            if f.fragment_index == fragment_index {
                                 break;
                             }
                             i += 1;
@@ -891,31 +885,30 @@ impl Server {
                     frag.fragment_index as usize,
                 );
                 holder.push(frag.fragment_index);
-
+            }
                 // print!("{} {}\n\n\n", holder.len(), frag.total_n_fragments);
-                if holder.len() == (frag.total_n_fragments) as usize {
-                    if let Some(mut data) = self.holder_rec.get_mut(&(session_id, src)) {
-                        remove_trailing_zeros(&mut data);
-                        let mut f_serialized = serialize(data.clone());
-                        let result = super::fragmentation_handling::reconstruct_message(
-                            data[0],
-                            &mut f_serialized,
-                        );
-
-                        if let Ok(msg) = result {
-                            self.holder_rec.remove(&(session_id, src));
-                            self.holder_frag_index.remove(&(session_id, src));
-                            self.pre_processed = Some(((session_id, src), msg.clone()));
-                            // println!("Message Reconstructed");
-                            return Some(msg.clone());
-                        } else {
-                            self.pre_processed = None;
-                            // println!("Message reconstruction failed");
-                            return None;
-                        }
+            if holder.len() == (frag.total_n_fragments) as usize {
+                if let Some(mut data) = self.holder_rec.get_mut(&(session_id, src)) {
+                    remove_trailing_zeros(&mut data);
+                    let mut f_serialized = serialize(data.clone());
+                    let result = super::fragmentation_handling::reconstruct_message(
+                        data[0],
+                        &mut f_serialized,
+                    );
+                    if let Ok(msg) = result {
+                        self.holder_rec.remove(&(session_id, src));
+                        self.holder_frag_index.remove(&(session_id, src));
+                        self.pre_processed = Some(((session_id, src), msg.clone()));
+                        // println!("Message Reconstructed");
+                        return Some(msg.clone());
+                    } else {
+                        self.pre_processed = None;
+                        // println!("Message reconstruction failed");
+                        return None;
                     }
                 }
             }
+            
             None
         } else {
             self.holder_rec.insert(
@@ -946,7 +939,6 @@ impl Server {
 
     fn get_hops(&mut self, dst: u8) -> Option<Vec<u8>> {
         self.server_topology.find_all_paths(self.id, dst);
-        self.server_topology.update_current_path();
         self.server_topology.set_path_based_on_dst(dst);
         self.server_topology.get_current_path()
     }

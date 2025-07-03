@@ -708,21 +708,25 @@ pub fn update_selector(
 pub fn crossbeam_listener(
     mut create_writer: EventWriter<PacketCreateEvent>,
     mut add_writer: EventWriter<PacketAddHopEvent>,
-    simulation_controller: Res<SimulationController>,
+    mut simulation_controller: ResMut<SimulationController>,
     state: Res<MainState>,
-) {
+){
     if let MainState::Sim = *state {
-        while let Ok(event) = simulation_controller
-            .receiver_client_server_event
-            .try_recv()
-        {
+        while let Ok(event) = simulation_controller.receiver_client_server_event.try_recv(){
             //println!("client or server sent a packet");
+            if let NodeEvent::ControllerShortcut(ref packet) = event {
+                shortcut(&mut simulation_controller, packet.clone());
+            }
             create_writer.write(PacketCreateEvent::NodeEvent(event));
+
         }
         while let Ok(event) = simulation_controller.receiver_drone_event.try_recv() {
             //println!("sent addhop event: {:?}",event);
+            if let DroneEvent::ControllerShortcut(ref packet) = event {
+                shortcut(&mut simulation_controller, packet.clone());
+            }
             create_writer.write(PacketCreateEvent::DroneEvent(event.clone()));
-            add_writer.write(PacketAddHopEvent { drone_event: event });
+            add_writer.write(PacketAddHopEvent{ drone_event: event});
         }
     }
 }

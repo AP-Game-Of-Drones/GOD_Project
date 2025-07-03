@@ -37,13 +37,13 @@ use setup::*;
 use systems::*;
 
 pub enum NodeCommand {
-    PacketShortcut(Packet),
-    AddSender(NodeId, Sender<Packet>),
+    AddSender(NodeId,Sender<Packet>),
     RemoveSender(NodeId),
 }
 #[derive(Debug)]
 pub enum NodeEvent {
     PacketSent(Packet),
+    ControllerShortcut(Packet),
 }
 
 const DRONE_NAMES: [&str; 10] = [
