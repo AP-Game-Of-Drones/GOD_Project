@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 use crate::{
-    frontend::{
-        self, ChatCommand, ChatEvent, WebCommand, WebEvent
+    frontend::{self, ChatCommand, ChatEvent, WebCommand, WebEvent},
+    utils::{
+        backup_server,
+        client::{chat_client::ChatClient, web_browser::WebBrowser},
+        controller::{NodeCommand, NodeEvent},
     },
-    utils::{backup_server, client::{chat_client::ChatClient, web_browser::WebBrowser}},
 };
 use bevy::scene::ron::error;
 use crossbeam_channel::*;
@@ -11,6 +13,7 @@ use rand::*;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fs,
+    hash::Hash,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
 };
@@ -23,38 +26,38 @@ use wg_2024::{
     packet::{NodeType, Packet},
 };
 
-use super::client::*;
 use super::backup_server::*;
-use super::simulation_controller::*;
+use super::client::*;
 
 fn parse_config(file: &str) -> Config {
+    println!("{file}");
     let file_str = fs::read_to_string(file).unwrap();
     toml::from_str(&file_str).unwrap()
 }
 
-const CHATAPP : u8 = 0;
-const WEBAPP : u8 = 1;
+const CHATAPP: u8 = 0;
+const WEBAPP: u8 = 1;
 
-fn helper3(config: &Config)->u8{
+fn helper3(config: &Config) -> u8 {
     let s_len = config.server.len();
     let c_len = config.client.len();
     let mut val = 0;
     let mut rng = rand::thread_rng();
     val = rng.r#gen::<u8>();
     let mut res = 0;
-    if c_len==1{
+    if c_len == 1 {
         res = WEBAPP;
-    } else if c_len ==2 {
-        if s_len==1 || s_len==2{
+    } else if c_len == 2 {
+        if s_len == 1 || s_len == 2 {
             res = CHATAPP;
-        } else if s_len>2{
-            res = val%2;
+        } else if s_len > 2 {
+            res = val % 2;
         }
-    } else if c_len > 2 {
-        if s_len==1 {
+    } else if c_len > 3 {
+        if s_len <= 3 {
             res = CHATAPP
-        } else if s_len>=2{
-            res = val%2;
+        } else if s_len >= 4 {
+            res = val % 2;
         }
     }
     res
@@ -94,7 +97,7 @@ fn helper2(counters: &mut [i32]) -> usize {
 fn build(
     id: NodeId,
     controller_drone_recv: crossbeam_channel::Receiver<DroneCommand>,
-    node_event_send: crossbeam_channel::Sender<DroneEvent>,
+    drone_event_send: crossbeam_channel::Sender<DroneEvent>,
     packet_recv: crossbeam_channel::Receiver<Packet>,
     packet_send: HashMap<NodeId, crossbeam_channel::Sender<Packet>>,
     pdr: f32,
@@ -105,7 +108,7 @@ fn build(
             println!("BagelBomber Id[{}]", id);
             let mut drone = bagel_bomber::BagelBomber::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -117,7 +120,7 @@ fn build(
             println!("BetteCallDrone Id[{}]", id);
             let mut drone = drone_bettercalldrone::BetterCallDrone::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -129,7 +132,7 @@ fn build(
             println!("RustRoveri Id[{}]", id);
             let mut drone = rust_roveri::drone::RustRoveri::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -141,7 +144,7 @@ fn build(
             println!("GetDroned Id[{}]", id);
             let mut drone = getdroned::GetDroned::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -150,15 +153,22 @@ fn build(
             drone.run();
         }
         4 => {
-            // println!("C++Enjoyers Id[{}]",id);
-            // let mut drone = ap2024_unitn_cppenjoyers_drone::CppEnjoyersDrone::new(id, node_event_send, controller_drone_recv, packet_recv, packet_send, pdr);
-            // drone.run();
+            println!("C++Enjoyers Id[{}]", id);
+            let mut drone = ap2024_unitn_cppenjoyers_drone::CppEnjoyersDrone::new(
+                id,
+                drone_event_send,
+                controller_drone_recv,
+                packet_recv,
+                packet_send,
+                pdr,
+            );
+            drone.run();
         }
         5 => {
             println!("D.R.O.N.E Id[{}]", id);
             let mut drone = d_r_o_n_e_drone::MyDrone::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -170,7 +180,7 @@ fn build(
             println!("NNP Id[{}]", id);
             let mut drone = null_pointer_drone::MyDrone::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -182,7 +192,7 @@ fn build(
             println!("Rustafarian Id[{}]", id);
             let mut drone = rustafarian_drone::RustafarianDrone::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -194,7 +204,7 @@ fn build(
             println!("DrOnes[{}]", id);
             let mut drone = dr_ones::Drone::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -206,7 +216,7 @@ fn build(
             println!("Rusteze Id[{}]", id);
             let mut drone = rusteze_drone::RustezeDrone::new(
                 id,
-                node_event_send,
+                drone_event_send,
                 controller_drone_recv,
                 packet_recv,
                 packet_send,
@@ -220,76 +230,77 @@ fn build(
     }
 }
 
-fn build_and_run_client
-(
-    id: NodeId, 
-    controller_send: Sender<NodeEvent>, 
-    controller_recv: Receiver<NodeCommand>, 
-    packet_recv: Receiver<Packet>, 
+fn build_and_run_client(
+    id: NodeId,
+    controller_send: Sender<NodeEvent>,
+    controller_recv: Receiver<NodeCommand>,
+    packet_recv: Receiver<Packet>,
     packet_send: HashMap<NodeId, Sender<Packet>>,
-    app_value: u8
-)->(Option<Sender<ChatCommand>>,Option<Receiver<ChatEvent>>,Option<Sender<WebCommand>>,Option<Receiver<WebEvent>>) {
+    app_value: u8,
+) -> (
+    Option<Sender<ChatCommand>>,
+    Option<Receiver<ChatEvent>>,
+    Option<Sender<WebCommand>>,
+    Option<Receiver<WebEvent>>,
+) {
     let (chat_events_sender, chat_events_receiver) = unbounded::<ChatEvent>();
     let (chat_commands_sender, chat_commands_receiver) = unbounded::<ChatCommand>();
     let (web_events_sender, web_events_receiver) = unbounded::<WebEvent>();
     let (web_commands_sender, web_commands_receiver) = unbounded::<WebCommand>();
-    let (mut chat_sender, mut chat_receiver, mut web_sender, mut web_receiver) = (None,None,None,None);
+    let (mut chat_sender, mut chat_receiver, mut web_sender, mut web_receiver) =
+        (None, None, None, None);
     if app_value == CHATAPP {
-        thread::spawn(move|| {
-            let mut client = ChatClient::new
-            (
-                id, 
-                controller_send, 
-                controller_recv, 
-                packet_recv, 
-                packet_send, 
-                chat_commands_receiver, 
+        thread::spawn(move || {
+            let mut client = ChatClient::new(
+                id,
+                controller_send,
+                controller_recv,
+                packet_recv,
+                packet_send,
+                chat_commands_receiver,
                 chat_events_sender,
             );
             client.handle_channels();
         });
-        (chat_sender,chat_receiver) = (Some(chat_commands_sender),Some(chat_events_receiver));
+        (chat_sender, chat_receiver) = (Some(chat_commands_sender), Some(chat_events_receiver));
     } else if app_value == WEBAPP {
-        thread::spawn(move|| {
-            let mut client = WebBrowser::new
-            (
-                id, 
-                controller_send, 
-                controller_recv, 
-                packet_recv, 
-                packet_send, 
-                web_commands_receiver, 
+        thread::spawn(move || {
+            let mut client = WebBrowser::new(
+                id,
+                controller_send,
+                controller_recv,
+                packet_recv,
+                packet_send,
+                web_commands_receiver,
                 web_events_sender,
             );
             client.handle_channels();
         });
-        (web_sender,web_receiver) = (Some(web_commands_sender),Some(web_events_receiver));
+        (web_sender, web_receiver) = (Some(web_commands_sender), Some(web_events_receiver));
     }
-    (chat_sender,chat_receiver,web_sender,web_receiver)
+    (chat_sender, chat_receiver, web_sender, web_receiver)
 }
 
-fn build_and_run_server
-(
-    id: NodeId, 
-    controller_send: Sender<NodeEvent>, 
-    controller_recv: Receiver<NodeCommand>, 
-    packet_recv: Receiver<Packet>, 
+fn build_and_run_server(
+    id: NodeId,
+    controller_send: Sender<NodeEvent>,
+    controller_recv: Receiver<NodeCommand>,
+    packet_recv: Receiver<Packet>,
     packet_send: HashMap<NodeId, Sender<Packet>>,
     app_value: u8,
     last_type: u8,
-)->u8 {
-    let mut  serv_type = 0;
+) -> u8 {
+    let mut serv_type = 0;
     if app_value == CHATAPP {
         serv_type = super::backup_server::CHATSERVER;
-        thread::spawn(move|| {
-            let mut server = Server::new
-            (
+        thread::spawn(move || {
+            let mut server = Server::new(
                 id,
                 serv_type,
-                controller_send, 
-                controller_recv, 
-                packet_recv, 
-                packet_send, 
+                controller_send,
+                controller_recv,
+                packet_recv,
+                packet_send,
             );
             server.handle_channels();
         });
@@ -299,16 +310,15 @@ fn build_and_run_server
         } else if last_type == super::backup_server::TEXTSERVER {
             serv_type = super::backup_server::MEDIASERVER;
         } else {
-            serv_type = random::<u8>() % 2 + 2;
+            serv_type = 1;
         }
-        thread::spawn(move|| {
-            let mut server = Server::new
-            (
-                id, 
+        thread::spawn(move || {
+            let mut server = Server::new(
+                id,
                 serv_type,
-                controller_send, 
+                controller_send,
                 controller_recv,
-                packet_recv, 
+                packet_recv,
                 packet_send,
             );
             server.handle_channels();
@@ -319,18 +329,22 @@ fn build_and_run_server
 
 pub fn initialize(
     path_to_file: &str,
-) -> Result<(
-    Vec<JoinHandle<()>>, 
-    HashMap<u8, super::super::frontend::chat_gui::GuiChannels>, 
-    HashMap<u8, super::super::frontend::web_gui::GuiChannels>)
-    , Box<dyn std::error::Error + Send + Sync>>
-{
+) -> Result<
+    (
+        Vec<JoinHandle<()>>,
+        HashMap<u8, super::super::frontend::chat_gui::GuiChannels>,
+        HashMap<u8, super::super::frontend::web_gui::GuiChannels>,
+        super::controller::SimulationController,
+        Config,
+    ),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let config = parse_config(path_to_file);
     let app_magic_value = helper3(&config);
 
     let mut dd = HashMap::new();
     let mut controller_drones = HashMap::new();
-    let (node_event_send, node_event_recv) = unbounded();
+    let (drone_event_send, drone_event_recv) = unbounded();
     let mut cs_controller = HashMap::new();
     let (cs_send, cs_recv) = unbounded::<NodeEvent>();
 
@@ -345,16 +359,22 @@ pub fn initialize(
         packet_channels.insert(server.id, unbounded());
     }
 
+    let senders = packet_channels
+        .clone()
+        .into_iter()
+        .map(|(id, (s, r))| (id, s))
+        .collect::<HashMap<u8, Sender<Packet>>>();
+
     let mut handles = Vec::new();
 
     let mut counters = [0; 10];
     let len = config.drone.len();
     println!("{}", len);
-    for drone in config.drone.into_iter() {
+    for drone in config.clone().drone.into_iter() {
         // controller
         let (controller_drone_send, controller_drone_recv) = unbounded();
         controller_drones.insert(drone.id, controller_drone_send);
-        let node_event_send = node_event_send.clone();
+        let drone_event_send = drone_event_send.clone();
         // packet
         let packet_recv = packet_channels[&drone.id].1.clone();
         let packet_send = drone
@@ -368,14 +388,13 @@ pub fn initialize(
         if len < 10 {
             val = helper1(&mut counters);
         } else {
-            val = helper2
-        (&mut counters);
+            val = helper2(&mut counters);
         }
         handles.push(thread::spawn(move || {
             build(
                 drone.id,
                 controller_drone_recv,
-                node_event_send,
+                drone_event_send,
                 packet_recv,
                 packet_send,
                 drone.pdr,
@@ -383,14 +402,14 @@ pub fn initialize(
             );
         }));
     }
-    let mut gui_web= HashMap::new();
-    let mut gui_chat= HashMap::new();
+    let mut gui_web = HashMap::new();
+    let mut gui_chat = HashMap::new();
 
-    for drone in config.client.into_iter() {
+    for drone in config.clone().client.into_iter() {
         // controller
-        let (controller_drone_send, controller_drone_recv) = unbounded::<NodeCommand>();
-        
-        cs_controller.insert(drone.id, controller_drone_send);
+        let (controller_node_send, controller_node_recv) = unbounded::<NodeCommand>();
+
+        cs_controller.insert(drone.id, controller_node_send);
         let cs_send = cs_send.clone();
         // packet
         let packet_recv = packet_channels[&drone.id].1.clone();
@@ -400,25 +419,28 @@ pub fn initialize(
             .map(|id| (id, packet_channels[&id].0.clone()))
             .collect();
 
-            let (cs,ce, ws, we) = build_and_run_client(
-                drone.id,
-                cs_send,
-                controller_drone_recv,
-                packet_recv,
-                packet_send,
-                app_magic_value,
-            );
-            if app_magic_value == CHATAPP {
-                let chat_channels = super::super::frontend::chat_gui::GuiChannels::new(ce.unwrap(), cs.unwrap());
-                gui_chat.insert(drone.id, chat_channels);
-            }
-            if app_magic_value == WEBAPP {
-                let chat_channels = super::super::frontend::web_gui::GuiChannels::new(we.unwrap(), ws.unwrap());
-                gui_web.insert(drone.id, chat_channels);
-            }
+        let (cs, ce, ws, we) = build_and_run_client(
+            drone.id,
+            cs_send,
+            controller_node_recv,
+            packet_recv,
+            packet_send,
+            app_magic_value,
+        );
+        if app_magic_value == CHATAPP {
+            let chat_channels =
+                super::super::frontend::chat_gui::GuiChannels::new(ce.unwrap(), cs.unwrap());
+            gui_chat.insert(drone.id, chat_channels);
+        }
+        if app_magic_value == WEBAPP {
+            let chat_channels =
+                super::super::frontend::web_gui::GuiChannels::new(we.unwrap(), ws.unwrap());
+            gui_web.insert(drone.id, chat_channels);
+        }
     }
 
-    for drone in config.server.into_iter() {
+    let mut last = 0;
+    for drone in config.server.clone().into_iter() {
         // controller
         let (controller_drone_send, controller_drone_recv) = unbounded();
         cs_controller.insert(drone.id, controller_drone_send);
@@ -430,30 +452,27 @@ pub fn initialize(
             .into_iter()
             .map(|id| (id, packet_channels[&id].0.clone()))
             .collect();
-            let mut last = 0;
-            let current  = build_and_run_server(
-                drone.id,
-                cs_send,
-                controller_drone_recv,
-                packet_recv,
-                packet_send,
-                app_magic_value,
-                last
-            );
-            last = current;
+        let current = build_and_run_server(
+            drone.id,
+            cs_send,
+            controller_drone_recv,
+            packet_recv,
+            packet_send,
+            app_magic_value,
+            last,
+        );
+        last = current;
     }
 
-    handles.push(thread::spawn(move || {
-        let mut controller = SimulationController {
-            droness: dd,
-            drones: controller_drones,
-            node_event_recv,
-            cli_ser_send: cs_controller,
-            cli_ser_recv: cs_recv,
-        };
-        loop {}
-    }));
-    Ok((handles, gui_chat, gui_web))
+    let controller = super::controller::SimulationController::new(
+        controller_drones,
+        cs_controller,
+        drone_event_recv,
+        cs_recv,
+        drone_event_send.clone(),
+        senders,
+    );
+    Ok((handles, gui_chat, gui_web, controller, config.clone()))
 }
 
 fn check_neighbors_id(current: NodeId, neighbors: &Vec<NodeId>) -> bool {
@@ -559,7 +578,7 @@ mod test {
         let config = parse_config("./configs/config.toml");
         let mut dd = HashMap::new();
         let mut controller_drones = HashMap::new();
-        let (node_event_send, node_event_recv) = unbounded();
+        let (drone_event_send, drone_event_recv) = unbounded();
         // let mut cs_controller = HashMap::new();
         let (cs_send, cs_recv) = unbounded::<NodeEvent>();
 
@@ -583,7 +602,7 @@ mod test {
             // controller
             let (controller_drone_send, controller_drone_recv) = unbounded();
             controller_drones.insert(drone.id, controller_drone_send);
-            let node_event_send = node_event_send.clone();
+            let drone_event_send = drone_event_send.clone();
             // packet
             let packet_recv = packet_channels[&drone.id].1.clone();
             let packet_send = drone
@@ -596,7 +615,7 @@ mod test {
             handles.push(thread::spawn(move || {
                 // let mut drone = null_pointer_drone::MyDrone::new(
                 //     drone.id,
-                //     node_event_send,
+                //     drone_event_send,
                 //     controller_drone_recv,
                 //     packet_recv,
                 //     packet_send,
@@ -606,7 +625,7 @@ mod test {
                 build(
                     drone.id,
                     controller_drone_recv,
-                    node_event_send,
+                    drone_event_send,
                     packet_recv,
                     packet_send,
                     drone.pdr,

@@ -1,9 +1,9 @@
 use crate::frontend::WebCommand;
 use crate::frontend::WebEvent;
 
+use super::super::controller::*;
 use super::super::fragmentation_handling::DefaultsRequest;
 use super::super::fragmentation_handling::*;
-use super::super::simulation_controller::*;
 use super::super::topology::*;
 use crossbeam_channel::*;
 use rand::rngs::OsRng;
@@ -90,10 +90,8 @@ impl WebBrowser {
         match packet.clone().pack_type {
             PacketType::Ack(ack) => {
                 // println!("REC ACK IN CHATCLIENT[{}]", self.id);
-                match self.recv_ack_n_handle(
-                    packet.clone().session_id,
-                    ack.clone().fragment_index,
-                ) {
+                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index)
+                {
                     Ok(_) => {
                         // println!("Handled Ack");
                     }
@@ -115,12 +113,9 @@ impl WebBrowser {
             }
             PacketType::FloodRequest(f_request) => {
                 // println!("REC FLOODREQUEST IN CHATCLIENT[{}]", self.id);
-                match self.recv_flood_request_n_handle(
-                    packet.session_id,
-                    &mut f_request.clone(),
-                ) {
+                match self.recv_flood_request_n_handle(packet.session_id, &mut f_request.clone()) {
                     Ok(_) => {
-                        println!("Handled FloodReq Client");
+                        // println!("Handled FloodReq Client");
                     }
                     Err(e) => {
                         println!("{}", e);
@@ -129,9 +124,7 @@ impl WebBrowser {
             }
             PacketType::FloodResponse(f_response) => {
                 // println!("REC FLOODRESPONSE IN CHATCLIENT[{}]", self.id);
-                match self.recv_flood_response_n_handle(
-                    f_response,
-                ) {
+                match self.recv_flood_response_n_handle(f_response) {
                     Ok(_) => {
                         // println!("Client Topology [{}] : {:?}\n\n",self.id , self.client_topology);
                         // println!("Handled FloodResp in CL\n");
@@ -175,64 +168,64 @@ impl WebBrowser {
         session_id: u64,
         src_id: NodeId,
     ) -> Result<ProcessWebResult, ProcessWebResult> {
-            match response.clone() {
-                Message::DefaultResponse(df) => match df {
-                    DefaultResponse::ALLTEXT(res) => {
-                        if !res.is_empty() {
-                            self.text.insert((session_id, src_id), res.clone());
-                            let _ = self.gui_event_sender.send(WebEvent::AllText(res.clone()));
-                            Ok(ProcessWebResult::ALLTEXT)
-                        } else {
-                            Err(ProcessWebResult::NOTEXTS)
-                        }
-                    }
-                    DefaultResponse::SERVERTYPE(res, id) => {
-                        if res == TEXTSERVER {
-                            self.text_servers.push(id);
-                            let _ = self.gui_event_sender.send(WebEvent::Servers(res, id));
-                            Ok(ProcessWebResult::SERVERFOUND)
-                        } else if res == MEDIASERVER {
-                            self.media_servers.push(id);
-                            let _ = self.gui_event_sender.send(WebEvent::Servers(res, id));
-                            Ok(ProcessWebResult::SERVERFOUND)
-                        } else {
-                            Err(ProcessWebResult::NOSERVER)
-                        }
-                    }
-                    DefaultResponse::ALLMEDIALINKS(res) => {
-                        if !res.is_empty() {
-                            self.text.insert((session_id, src_id), res.clone());
-                            let _ = self.gui_event_sender.send(WebEvent::AllMedia(res.clone()));
-                            Ok(ProcessWebResult::ALLMEDIA)
-                        } else {
-                            Err(ProcessWebResult::NOMEDIAS)
-                        }
-                    }
-                    DefaultResponse::ERRNOMEDIA => Err(ProcessWebResult::NOMEDIAS),
-                    DefaultResponse::ERRNOTEXT => Err(ProcessWebResult::NOTEXTS),
-                    _ => Err(ProcessWebResult::ERR),
-                },
-                Message::ContentResponse(cr) => match cr.clone() {
-                    ContentResponse::MEDIAIMAGE(res) => {
-                        self.media.insert((session_id, src_id), response.clone());
-                        let _ = self.gui_event_sender.send(WebEvent::Image(res.clone()));
-                        Ok(ProcessWebResult::MEDIA)
-                    }
-                    ContentResponse::MEDIAUDIO(res) => {
-                        self.media.insert((session_id, src_id), response.clone());
-                        let _ = self.gui_event_sender.send(WebEvent::Audio(res.clone()));
-                        Ok(ProcessWebResult::MEDIA)
-                    }
-                    ContentResponse::TEXT(res) => {
+        match response.clone() {
+            Message::DefaultResponse(df) => match df {
+                DefaultResponse::ALLTEXT(res) => {
+                    if !res.is_empty() {
                         self.text.insert((session_id, src_id), res.clone());
-                        let _ = self.gui_event_sender.send(WebEvent::Text(res.clone()));
-                        Ok(ProcessWebResult::TEXT)
+                        let _ = self.gui_event_sender.send(WebEvent::AllText(res.clone()));
+                        Ok(ProcessWebResult::ALLTEXT)
+                    } else {
+                        Err(ProcessWebResult::NOTEXTS)
                     }
-                    ContentResponse::NOMEDIAFOUND => Err(ProcessWebResult::NOMEDIA),
-                    ContentResponse::NOTEXTFOUND => Err(ProcessWebResult::NOTEXT),
-                },
+                }
+                DefaultResponse::SERVERTYPE(res, id) => {
+                    if res == TEXTSERVER {
+                        self.text_servers.push(id);
+                        let _ = self.gui_event_sender.send(WebEvent::Servers(res, id));
+                        Ok(ProcessWebResult::SERVERFOUND)
+                    } else if res == MEDIASERVER {
+                        self.media_servers.push(id);
+                        let _ = self.gui_event_sender.send(WebEvent::Servers(res, id));
+                        Ok(ProcessWebResult::SERVERFOUND)
+                    } else {
+                        Err(ProcessWebResult::NOSERVER)
+                    }
+                }
+                DefaultResponse::ALLMEDIALINKS(res) => {
+                    if !res.is_empty() {
+                        self.text.insert((session_id, src_id), res.clone());
+                        let _ = self.gui_event_sender.send(WebEvent::AllMedia(res.clone()));
+                        Ok(ProcessWebResult::ALLMEDIA)
+                    } else {
+                        Err(ProcessWebResult::NOMEDIAS)
+                    }
+                }
+                DefaultResponse::ERRNOMEDIA => Err(ProcessWebResult::NOMEDIAS),
+                DefaultResponse::ERRNOTEXT => Err(ProcessWebResult::NOTEXTS),
                 _ => Err(ProcessWebResult::ERR),
-            }
+            },
+            Message::ContentResponse(cr) => match cr.clone() {
+                ContentResponse::MEDIAIMAGE(res) => {
+                    self.media.insert((session_id, src_id), response.clone());
+                    let _ = self.gui_event_sender.send(WebEvent::Image(res.clone()));
+                    Ok(ProcessWebResult::MEDIA)
+                }
+                ContentResponse::MEDIAUDIO(res) => {
+                    self.media.insert((session_id, src_id), response.clone());
+                    let _ = self.gui_event_sender.send(WebEvent::Audio(res.clone()));
+                    Ok(ProcessWebResult::MEDIA)
+                }
+                ContentResponse::TEXT(res) => {
+                    self.text.insert((session_id, src_id), res.clone());
+                    let _ = self.gui_event_sender.send(WebEvent::Text(res.clone()));
+                    Ok(ProcessWebResult::TEXT)
+                }
+                ContentResponse::NOMEDIAFOUND => Err(ProcessWebResult::NOMEDIA),
+                ContentResponse::NOTEXTFOUND => Err(ProcessWebResult::NOTEXT),
+            },
+            _ => Err(ProcessWebResult::ERR),
+        }
     }
 
     fn send_new_server_req(&mut self, dst: NodeId) -> Result<(), String> {
@@ -279,7 +272,9 @@ impl WebBrowser {
                     for pack in packets {
                         match self.send_new_packet(&pack.clone()) {
                             Ok(_) => {
-                                let _ = self.controller_send.send(NodeEvent::SentPacket(pack.clone()));
+                                let _ = self
+                                    .controller_send
+                                    .send(NodeEvent::PacketSent(pack.clone()));
                                 // println!("Sent new packet in client");
                             }
                             Err(e) => {
@@ -310,16 +305,16 @@ impl WebBrowser {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
-                            // NodeCommand::ShortCut(packet)=>{
-                            //     self.handle_packet(packet);
-                            // },
-                            // NodeCommand::AddSender(id,sender)=>{
-                            //     self.packet_send.insert(id, sender);
-                            // },
-                            // NodeCommand::RemoveSender(id)=>{
-                            //     self.packet_send.remove(&id);
-                            //     self.client_topology.remove_node(id);
-                            // }
+                            NodeCommand::PacketShortcut(packet)=>{
+                                self.handle_packet(packet);
+                            },
+                            NodeCommand::AddSender(id,sender)=>{
+                                self.packet_send.insert(id, sender);
+                            },
+                            NodeCommand::RemoveSender(id)=>{
+                                self.packet_send.remove(&id);
+                                self.client_topology.remove_node(id);
+                            }
                             _=>{}
                         }
                     }
@@ -333,11 +328,13 @@ impl WebBrowser {
                                 }
                             },
                             WebCommand::GetAllText(id)=>{
+                                bevy::log::info!("All Text to {:?}", id);
                                 if self.text_servers.contains(&id) {
                                     let _ = self.send_new_all_text_req(id);
                                 }
                             },
                             WebCommand::GetAllMedia(id)=>{
+                                bevy::log::info!("All Media to {:?}", id);
                                 if self.media_servers.contains(&id) {
                                     let _ = self.send_new_all_media_req(id);
                                 }
@@ -355,7 +352,7 @@ impl WebBrowser {
                         }
                     }
                 },
-                default(Duration::from_secs(15)) => {
+                default(Duration::from_secs(5)) => {
                     let mut session_id = 0;
                     while self.session_id_alredy_used(session_id) {
                         session_id = rand_session_id();
@@ -387,6 +384,7 @@ impl WebBrowser {
                     )) {
                     Ok(_) => {
                         // println!("Sent new flood_req from Client[{}]", self.id);
+                        // self.controller_send.send(NodeEvent::PacketSent(packet.clone())).ok();
                     }
                     Err(_) => {
                         println!(
@@ -408,6 +406,9 @@ impl WebBrowser {
             {
                 match sender.send(packet.clone()) {
                     Ok(_) => {
+                        self.controller_send
+                            .send(NodeEvent::PacketSent(packet.clone()))
+                            .ok();
                         return Ok(());
                     }
                     Err(_) => {
@@ -432,14 +433,18 @@ impl WebBrowser {
         self.client_topology.set_path_based_on_dst(*server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) = traces {
+            let packet = Packet::new_ack(
+                SourceRoutingHeader::with_first_hop(trace.clone()),
+                session_id,
+                fragment_index,
+            );
             if let Some(sender) = self.packet_send.get(&trace[1]) {
-                if let Err(_e) = sender.send(Packet::new_ack(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fragment_index,
-                )) {
+                if let Err(_e) = sender.send(packet.clone()) {
                     return Err("Sender error");
                 } else {
+                    self.controller_send
+                        .send(NodeEvent::PacketSent(packet.clone()))
+                        .ok();
                     return Ok(());
                 }
             } else {
@@ -460,12 +465,16 @@ impl WebBrowser {
         self.client_topology.set_path_based_on_dst(server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) = traces {
+            let packet = Packet::new_fragment(
+                SourceRoutingHeader::with_first_hop(trace.clone()),
+                session_id,
+                fragment.clone(),
+            );
             if let Some(sender) = self.packet_send.get(&trace[1]) {
-                if let Ok(_) = sender.send(Packet::new_fragment(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fragment.clone(),
-                )) {
+                if let Ok(_) = sender.send(packet.clone()) {
+                    self.controller_send
+                        .send(NodeEvent::PacketSent(packet.clone()))
+                        .ok();
                     return Ok(());
                 } else {
                     return Err("Error in sender");
@@ -489,7 +498,7 @@ impl WebBrowser {
                 Ok(_) => {
                     let _ = self
                         .controller_send
-                        .send(NodeEvent::SentPacket(packet.clone()));
+                        .send(NodeEvent::PacketSent(packet.clone()));
                     Ok(())
                 }
                 Err(_) => Err("Something wrong with the sender"),
@@ -631,6 +640,8 @@ impl WebBrowser {
                 // println!("Error in routing nacked");
 
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
+                    //Could be a drone in crash mode so remove the node id from topology and update it
+                    self.client_topology.remove_node(id);
                     //update the path since it might mean a drone has crashed or bad routing
                     self.client_topology.increment_weights_for_node(id);
                     self.client_topology.update_current_path();
@@ -678,7 +689,7 @@ impl WebBrowser {
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
                                         f.clone(),
-                                    )
+                                    );
                                 }
                             }
                             PacketType::Ack(a) => {
@@ -705,11 +716,7 @@ impl WebBrowser {
         return Err("No match found for session_id and fragment_index");
     }
 
-    pub fn recv_ack_n_handle(
-        &mut self,
-        session_id: u64,
-        fragment_index: u64,
-    ) -> Result<(), &str> {
+    pub fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
         if let Some(holder) = { self.holder_sent.get(&(session_id, self.id)) } {
             if holder.is_empty() && fragment_index == 0 {
                 return Err("All fragments of corrisponding message have been received");

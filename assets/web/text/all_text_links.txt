@@ -1,1 +1,1 @@
-./assets/web/text/all_media_links
+assets/web/text/all_media_links.txt

@@ -1,6 +1,6 @@
+use super::controller::*;
 use super::fragmentation_handling::DefaultsRequest;
 use super::fragmentation_handling::*;
-use super::simulation_controller::*;
 use bevy::audio::AudioSource;
 use bevy::log::info;
 use crossbeam_channel::*;
@@ -24,8 +24,8 @@ pub const CHATSERVER: u8 = 3;
 
 include!(concat!(env!("OUT_DIR"), "/build_constants.rs"));
 
-const ALLTEXT: &str = "/assets/web/text/all_text_links.txt";
-const ALLMEDIA: &str = "/assets/web/text/all_media_links.txt";
+const ALLTEXT: &str = "assets/web/text/all_text_links.txt";
+const ALLMEDIA: &str = "assets/web/text/all_media_links.txt";
 
 pub trait Servers: Sized + Send + Sync {}
 impl Servers for Server {}
@@ -148,7 +148,23 @@ impl Server {
                 }
                 DefaultsRequest::GETALLTEXT => {
                     if self.is_text_server() {
-                        let all_text = get_all((PROJECT_DIR.to_string() + ALLTEXT).as_str());
+                        let all_text = get_all(
+                            std::env::current_exe()
+                                .expect("Faild to get exe path")
+                                .parent()
+                                .unwrap()
+                                .to_path_buf()
+                                .parent()
+                                .unwrap()
+                                .to_path_buf()
+                                .parent()
+                                .unwrap()
+                                .to_path_buf()
+                                .join(ALLTEXT)
+                                .to_str()
+                                .unwrap(),
+                        );
+                        info!("{:?}", all_text.clone());
                         self.send_from_server(
                             src_id,
                             Message::DefaultResponse(DefaultResponse::new_all_text_rsp(all_text)),
@@ -161,7 +177,22 @@ impl Server {
                     }
                 }
                 DefaultsRequest::GETALLMEDIALINKS => {
-                    let all_text = get_all((PROJECT_DIR.to_string() + ALLMEDIA).as_str());
+                    let all_text = get_all(
+                        std::env::current_exe()
+                            .expect("Faild to get exe path")
+                            .parent()
+                            .unwrap()
+                            .to_path_buf()
+                            .parent()
+                            .unwrap()
+                            .to_path_buf()
+                            .parent()
+                            .unwrap()
+                            .to_path_buf()
+                            .join(ALLMEDIA)
+                            .to_str()
+                            .unwrap(),
+                    );
                     info!("{:?}", all_text.clone());
                     if self.is_media_server() {
                         self.send_from_server(
@@ -183,7 +214,22 @@ impl Server {
                 ContentRequest::GETMEDIA(path) => {
                     if self.is_media_server() {
                         if path.contains("image") {
-                            let media = image::open(path.as_str());
+                            let media = image::open(
+                                std::env::current_exe()
+                                    .expect("Faild to get exe path")
+                                    .parent()
+                                    .unwrap()
+                                    .to_path_buf()
+                                    .parent()
+                                    .unwrap()
+                                    .to_path_buf()
+                                    .parent()
+                                    .unwrap()
+                                    .to_path_buf()
+                                    .join(path.as_str())
+                                    .to_str()
+                                    .unwrap(),
+                            );
                             info!(
                                 "Received request for {},{:?}",
                                 path,
@@ -202,7 +248,22 @@ impl Server {
                                 );
                             }
                         } else if path.contains("audio") {
-                            let track_bytes = fs::read(path.as_str());
+                            let track_bytes = fs::read(
+                                std::env::current_exe()
+                                    .expect("Faild to get exe path")
+                                    .parent()
+                                    .unwrap()
+                                    .to_path_buf()
+                                    .parent()
+                                    .unwrap()
+                                    .to_path_buf()
+                                    .parent()
+                                    .unwrap()
+                                    .to_path_buf()
+                                    .join(path.as_str())
+                                    .to_str()
+                                    .unwrap(),
+                            );
                             if let Ok(bytes) = track_bytes {
                                 let track = AudioSource {
                                     bytes: Arc::from(bytes),
@@ -222,7 +283,22 @@ impl Server {
                 }
                 ContentRequest::GETTEXT(path) => {
                     if self.is_text_server() {
-                        let text = get_all(path.as_str());
+                        let text = get_all(
+                            std::env::current_exe()
+                                .expect("Faild to get exe path")
+                                .parent()
+                                .unwrap()
+                                .to_path_buf()
+                                .parent()
+                                .unwrap()
+                                .to_path_buf()
+                                .parent()
+                                .unwrap()
+                                .to_path_buf()
+                                .join(path.as_str())
+                                .to_str()
+                                .unwrap(),
+                        );
                         self.send_from_server(
                             src_id,
                             Message::ContentResponse(ContentResponse::TEXT(text)),
@@ -279,83 +355,107 @@ impl Server {
             _ => {}
         }
     }
+    fn handle_packet(&mut self, packet: Packet) {
+        match packet.clone().pack_type {
+            PacketType::Ack(ack) => {
+                // println!("REC ACK IN CHATCLIENT[{}]", self.id);
+                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index)
+                {
+                    Ok(_) => {
+                        // println!("Handled Ack");
+                    }
+                    Err(e) => {
+                        println!("{}", e);
+                    }
+                }
+            }
+            PacketType::Nack(nack) => {
+                // println!("REC NACK IN CHATCLIENT[{}]", self.id);
+                match self.recv_nack_n_handle(packet.session_id, nack, &packet.clone()) {
+                    Ok(_) => {
+                        // println!("Handled Nack");
+                    }
+                    Err(e) => {
+                        println!("{}", e);
+                    }
+                }
+            }
+            PacketType::FloodRequest(f_request) => {
+                // println!("REC FLOODREQUEST IN CHATCLIENT[{}]", self.id);
+                match self.recv_flood_request_n_handle(packet.session_id, &mut f_request.clone()) {
+                    Ok(_) => {
+                        // println!("Handled FloodReq Client");
+                    }
+                    Err(e) => {
+                        println!("{}", e);
+                    }
+                }
+            }
+            PacketType::FloodResponse(f_response) => {
+                // println!("REC FLOODRESPONSE IN CHATCLIENT[{}]", self.id);
+                match self.recv_flood_response_n_handle(f_response) {
+                    Ok(_) => {
+                        // println!("Client Topology [{}] : {:?}\n\n",self.id , self.client_topology);
+                        // println!("Handled FloodResp in CL\n");
+                    }
+                    Err(e) => {
+                        println!("Err: {}", e);
+                    }
+                }
+            }
+            PacketType::MsgFragment(fragment) => {
+                // println!("REC MSGFRAGMENT IN SERVER[{}]",self.id);
+                match self.recv_frag_n_handle(
+                    packet.session_id,
+                    packet.clone().routing_header.hops[0],
+                    &fragment,
+                ) {
+                    Some(m) => {
+                        // println!("msg in server {} \n \n ",self.id);
+                        self.pre_processed = Some((
+                            (packet.session_id, packet.clone().routing_header.hops[0]),
+                            m.clone(),
+                        ));
+                        self.handle_req(
+                            m.clone(),
+                            packet.clone().routing_header.hops[0],
+                            packet.session_id,
+                        );
+                    }
+                    None => {
+                        // println!("No message reconstructed");
+                    }
+                }
+            }
+        }
+    }
 
     pub fn handle_channels(&mut self) {
         loop {
             select! {
                 recv(self.packet_recv) -> packet_res => {
                     if let Ok(packet) = packet_res {
-                        match packet.clone().pack_type {
-                            PacketType::Ack(ack) => {
-                                // println!("REC ACK IN SERVER[{}]",self.id);
-                                match self.recv_ack_n_handle(packet.clone().session_id,ack.clone().fragment_index){
-                                    Ok(_) => {
-                                        // println!("Handled Ack");
-                                    },
-                                    Err(e) => {
-                                        println!("{}",e);
-                                    }
-                                }
-                            },
-                            PacketType::Nack(nack) => {
-                                // println!("REC NACK IN SERVER[{}]",self.id);
-                                match self.recv_nack_n_handle(packet.session_id, nack, &packet.clone()) {
-                                    Ok(_) => {
-                                        // println!("Handled Nack");
-                                    },
-                                    Err(e) => {
-                                        println!("{}",e);
-                                    }
-                                }
-                            },
-                            PacketType::FloodRequest(f_request) => {
-                                // println!("REC FLOODREQUEST IN SERVER[{}]",self.id);
-                                match self.recv_flood_request_n_handle(packet.session_id, &mut f_request.clone()) {
-                                    Ok(_) => {
-                                        // println!("Handled FloodReq in Server & Sent new Flood Response");
-                                    },
-                                    Err(e) => {
-                                        println!("{}",e);
-                                    }
-                                }
-                            },
-                            PacketType::FloodResponse(f_response) => {
-                                // println!("REC FLOODRESPONSE IN SERVER[{}]",self.id);
-
-                                match self.recv_flood_response_n_handle(f_response) {
-                                    Ok(_) => {
-                                        // println!("Server Topology: {:?}\n\n",self.server_topology);
-                                        // println!("Handled FloodResp");
-                                    },
-                                    Err(e) => {
-                                        println!("{}",e);
-                                    }
-                                }
-                            },
-                            PacketType::MsgFragment(fragment) => {
-                                // println!("REC MSGFRAGMENT IN SERVER[{}]",self.id);
-                                match self.recv_frag_n_handle(packet.session_id, packet.clone().routing_header.hops[0], &fragment) {
-                                    Some(m) => {
-                                        // println!("msg in server {} \n \n ",self.id);
-                                        self.pre_processed=Some(((packet.session_id,packet.clone().routing_header.hops[0]),m.clone()));
-                                        self.handle_req(m.clone(), packet.clone().routing_header.hops[0], packet.session_id);
-                                    },
-                                    None => {
-                                        // println!("No message reconstructed");
-                                    }
-                                }
-                            }
-                        }
+                        self.handle_packet(packet.clone());
                     }
                 },
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
-                         _=>{}
+                            NodeCommand::PacketShortcut(packet)=>{
+                                self.handle_packet(packet.clone());
+                            },
+                            NodeCommand::AddSender(id,sender)=>{
+                                self.packet_send.insert(id, sender);
+                            },
+                            NodeCommand::RemoveSender(id)=>{
+                                self.packet_send.remove(&id);
+                                self.server_topology.remove_node(id);
+                            }
+                            _=>{}
                         }
                     }
                 },
-                default(Duration::from_secs(15)) => {
+                default(Duration::from_secs(5)) => {
                     let mut session_id = 0;
                     while self.session_id_already_used(session_id) {
                         session_id = rand_session_id();
@@ -386,6 +486,7 @@ impl Server {
                         },
                     )) {
                     Ok(_) => {
+                        // self.controller_send.send(NodeEvent::PacketSent(packet.clone())).ok();
                         // println!("Sent new flood_req from server[{}]", self.id);
                     }
                     Err(_) => {
@@ -408,6 +509,9 @@ impl Server {
             {
                 match sender.send(packet.clone()) {
                     Ok(_) => {
+                        self.controller_send
+                            .send(NodeEvent::PacketSent(packet.clone()))
+                            .ok();
                         return Ok(());
                     }
                     Err(_) => {
@@ -422,24 +526,23 @@ impl Server {
         }
     }
 
-    fn send_ack(
-        &mut self,
-        session_id: u64,
-        dst: &u8,
-        fragment_index: u64,
-    ) -> Result<(), &str> {
+    fn send_ack(&mut self, session_id: u64, dst: &u8, fragment_index: u64) -> Result<(), &str> {
         self.server_topology.find_all_paths(self.id, *dst);
         self.server_topology.set_path_based_on_dst(*dst);
         let traces = self.server_topology.get_current_path();
         if let Some(trace) = traces {
+            let packet = Packet::new_ack(
+                SourceRoutingHeader::with_first_hop(trace.clone()),
+                session_id,
+                fragment_index,
+            );
             if let Some(sender) = self.packet_send.get(&trace[1]) {
-                if let Err(_e) = sender.send(Packet::new_ack(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fragment_index,
-                )) {
+                if let Err(_e) = sender.send(packet.clone()) {
                     return Err("Sender error");
                 } else {
+                    self.controller_send
+                        .send(NodeEvent::PacketSent(packet.clone()))
+                        .ok();
                     return Ok(());
                 }
             } else {
@@ -460,12 +563,16 @@ impl Server {
         self.server_topology.set_path_based_on_dst(server_id);
         let traces = self.server_topology.get_current_path();
         if let Some(trace) = traces {
+            let packet = Packet::new_fragment(
+                SourceRoutingHeader::with_first_hop(trace.clone()),
+                session_id,
+                fragment.clone(),
+            );
             if let Some(sender) = self.packet_send.get(&trace[1]) {
-                if let Ok(_) = sender.send(Packet::new_fragment(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fragment.clone(),
-                )) {
+                if let Ok(_) = sender.send(packet.clone()) {
+                    self.controller_send
+                        .send(NodeEvent::PacketSent(packet.clone()))
+                        .ok();
                     return Ok(());
                 } else {
                     return Err("Error in sender");
@@ -511,7 +618,7 @@ impl Server {
                 Ok(_) => {
                     let _ = self
                         .controller_send
-                        .send(NodeEvent::SentPacket(packet.clone()));
+                        .send(NodeEvent::PacketSent(packet.clone()));
                     Ok(())
                 }
                 Err(_) => Err("Something wrong with the sender"),
@@ -521,10 +628,7 @@ impl Server {
         }
     }
 
-    fn recv_flood_response_n_handle(
-        &mut self,
-        flood_packet: FloodResponse,
-    ) -> Result<(), &str> {
+    fn recv_flood_response_n_handle(&mut self, flood_packet: FloodResponse) -> Result<(), &str> {
         self.server_topology
             .update_topology((self.id, NodeType::Server), flood_packet.path_trace.clone());
         // println!("Path trace in server {:?}", flood_packet.path_trace.clone());
@@ -590,7 +694,6 @@ impl Server {
                 //check route, it shouldn't happen if the routing was done right
 
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
-                    info!("Received Nack for session {}->Line 594",session_id);
                     for p in packets.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
@@ -629,12 +732,13 @@ impl Server {
             NackType::Dropped => {
                 //update weight of the path used and change it there's one with less
                 if let Some(fr) = { self.holder_sent.get(&(session_id, self.id)) } {
-                    info!("Received Nack for session {}: Line->634",session_id);
-
                     for p in fr.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
-                                info!("FragmentIndex {} NAckIndex{}: Line->639",f.fragment_index,nack.fragment_index);
+                                info!(
+                                    "FragmentIndex {} NAckIndex{}: Line->639",
+                                    f.fragment_index, nack.fragment_index
+                                );
                                 if f.fragment_index == nack.fragment_index {
                                     self.server_topology
                                         .increment_weights_for_node(packet.routing_header.hops[0]);
@@ -643,7 +747,7 @@ impl Server {
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
                                         f.clone(),
-                                    )
+                                    );
                                 }
                             }
                             _ => {
@@ -657,8 +761,8 @@ impl Server {
             }
             NackType::ErrorInRouting(id) => {
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
-                    info!("Received Nack for session {} : Line->662 ",session_id);
-
+                    //Could be a drone in crash mode so remove the node id from topology and update it
+                    self.server_topology.remove_node(id);
                     //update the path since it might mean a drone has crashed or bad routing
                     self.server_topology.increment_weights_for_node(id);
                     self.server_topology.update_current_path();
@@ -694,7 +798,7 @@ impl Server {
             NackType::UnexpectedRecipient(id) => {
                 //shouldn't happen, if it happens update paths and update topology
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)) } {
-                    info!("Received Nack for session {}: Line->700",session_id);
+                    info!("Received Nack for session {}: Line->700", session_id);
 
                     for p in packets.clone() {
                         match p.clone().pack_type {
@@ -733,11 +837,7 @@ impl Server {
         return Err("No match found for session_id and fragment_index");
     }
 
-    fn recv_ack_n_handle(
-        &mut self,
-        session_id: u64,
-        fragment_index: u64,
-    ) -> Result<(), &str> {
+    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
         if let Some(holder) = { self.holder_sent.get(&(session_id, self.id)) } {
             if holder.is_empty() && fragment_index == 0 {
                 return Err("All fragments of corrisponding message have been received");

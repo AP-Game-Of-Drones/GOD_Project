@@ -1,8 +1,8 @@
 use super::super::super::frontend::ChatCommand;
 use super::super::super::frontend::ChatEvent;
+use super::super::controller::*;
 use super::super::fragmentation_handling::DefaultsRequest;
 use super::super::fragmentation_handling::*;
-use super::super::simulation_controller::*;
 use crossbeam_channel::*;
 use rand::RngCore;
 use rand::rngs::OsRng;
@@ -115,8 +115,7 @@ impl ChatClient {
                 self.client_topology.find_all_paths(self.id, dst);
                 self.client_topology.set_path_based_on_dst(dst);
                 let hops = self.get_hops(dst);
-                let packets =
-                    fragment_packetization(&mut fragments, hops.clone(), session_id);
+                let packets = fragment_packetization(&mut fragments, hops.clone(), session_id);
                 if !packets.is_empty() {
                     self.sent.insert((session_id, self.id), msg.clone());
                     self.holder_sent
@@ -124,7 +123,9 @@ impl ChatClient {
                     for pack in packets {
                         match self.send_new_packet(&pack.clone()) {
                             Ok(_) => {
-                                let _ = self.controller_send.send(NodeEvent::SentPacket(pack.clone()));
+                                let _ = self
+                                    .controller_send
+                                    .send(NodeEvent::PacketSent(pack.clone()));
                                 // println!("Sent packet new in client");
                             }
                             Err(e) => {
@@ -249,10 +250,8 @@ impl ChatClient {
         match packet.clone().pack_type {
             PacketType::Ack(ack) => {
                 // println!("REC ACK IN CHATCLIENT[{}]", self.id);
-                match self.recv_ack_n_handle(
-                    packet.clone().session_id,
-                    ack.clone().fragment_index,
-                ) {
+                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index)
+                {
                     Ok(_) => {
                         // println!("Handled Ack");
                     }
@@ -274,10 +273,7 @@ impl ChatClient {
             }
             PacketType::FloodRequest(f_request) => {
                 // println!("REC FLOODREQUEST IN CHATCLIENT[{}]", self.id);
-                match self.recv_flood_request_n_handle(
-                    packet.session_id,
-                    &mut f_request.clone(),
-                ) {
+                match self.recv_flood_request_n_handle(packet.session_id, &mut f_request.clone()) {
                     Ok(_) => {
                         // println!("Handled FloodReq Client");
                     }
@@ -288,9 +284,7 @@ impl ChatClient {
             }
             PacketType::FloodResponse(f_response) => {
                 // println!("REC FLOODRESPONSE IN CHATCLIENT[{}]", self.id);
-                match self.recv_flood_response_n_handle(
-                    f_response,
-                ) {
+                match self.recv_flood_response_n_handle(f_response) {
                     Ok(_) => {
                         // println!("Client Topology [{}] : {:?}\n\n",self.id , self.client_topology);
                         // println!("Handled FloodResp in CL\n");
@@ -339,16 +333,16 @@ impl ChatClient {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
-                            // NodeCommand::ShortCut(packet)=>{
-                            //     self.handle_packet(packet);
-                            // },
-                            // NodeCommand::AddSender(id,sender)=>{
-                            //     self.packet_send.insert(id, sender);
-                            // },
-                            // NodeCommand::RemoveSender(id)=>{
-                            //     self.packet_send.remove(&id);
-                            //     self.client_topology.remove_node(id);
-                            // }
+                            NodeCommand::PacketShortcut(packet)=>{
+                                self.handle_packet(packet);
+                            },
+                            NodeCommand::AddSender(id,sender)=>{
+                                self.packet_send.insert(id, sender);
+                            },
+                            NodeCommand::RemoveSender(id)=>{
+                                self.packet_send.remove(&id);
+                                self.client_topology.remove_node(id);
+                            }
                             _=>{}
                         }
                     }
@@ -373,7 +367,7 @@ impl ChatClient {
                         }
                     }
                 },
-                default(Duration::from_secs(15)) => {
+                default(Duration::from_secs(5)) => {
                     let mut session_id = 0;
                     while self.session_id_alredy_used(session_id) {
                         session_id = rand_session_id();
@@ -389,22 +383,25 @@ impl ChatClient {
         if self.packet_send.is_empty() {
             Err("No neighbors in Client")
         } else {
+            let packet = Packet::new_flood_request(
+                SourceRoutingHeader::empty_route(),
+                session_id,
+                FloodRequest {
+                    flood_id,
+                    initiator_id: self.id,
+                    path_trace: vec![(self.id, NodeType::Client)].clone(),
+                },
+            );
             for neighbors in self.packet_send.clone() {
                 match self
                     .packet_send
                     .get(&neighbors.0)
                     .unwrap()
-                    .send(Packet::new_flood_request(
-                        SourceRoutingHeader::empty_route(),
-                        session_id,
-                        FloodRequest {
-                            flood_id,
-                            initiator_id: self.id,
-                            path_trace: vec![(self.id, NodeType::Client)].clone(),
-                        },
-                    )) {
+                    .send(packet.clone())
+                {
                     Ok(_) => {
                         // println!("Sent new flood_req from Client[{}]", self.id);
+                        // self.controller_send.send(NodeEvent::PacketSent(packet.clone())).ok();
                     }
                     Err(_) => {
                         println!(
@@ -426,6 +423,9 @@ impl ChatClient {
             {
                 match sender.send(packet.clone()) {
                     Ok(_) => {
+                        self.controller_send
+                            .send(NodeEvent::PacketSent(packet.clone()))
+                            .ok();
                         return Ok(());
                     }
                     Err(_) => {
@@ -450,14 +450,18 @@ impl ChatClient {
         self.client_topology.set_path_based_on_dst(*server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) = traces {
+            let packet = Packet::new_ack(
+                SourceRoutingHeader::with_first_hop(trace.clone()),
+                session_id,
+                fragment_index,
+            );
             if let Some(sender) = self.packet_send.get(&trace[1]) {
-                if let Err(_e) = sender.send(Packet::new_ack(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fragment_index,
-                )) {
+                if let Err(_e) = sender.send(packet.clone()) {
                     return Err("Sender error");
                 } else {
+                    self.controller_send
+                        .send(NodeEvent::PacketSent(packet.clone()))
+                        .ok();
                     return Ok(());
                 }
             } else {
@@ -478,12 +482,16 @@ impl ChatClient {
         self.client_topology.set_path_based_on_dst(server_id);
         let traces = self.client_topology.get_current_path();
         if let Some(trace) = traces {
+            let packet = Packet::new_fragment(
+                SourceRoutingHeader::with_first_hop(trace.clone()),
+                session_id,
+                fragment.clone(),
+            );
             if let Some(sender) = self.packet_send.get(&trace[1]) {
-                if let Ok(_) = sender.send(Packet::new_fragment(
-                    SourceRoutingHeader::with_first_hop(trace.clone()),
-                    session_id,
-                    fragment.clone(),
-                )) {
+                if let Ok(_) = sender.send(packet.clone()) {
+                    self.controller_send
+                        .send(NodeEvent::PacketSent(packet.clone()))
+                        .ok();
                     return Ok(());
                 } else {
                     return Err("Error in sender");
@@ -507,7 +515,7 @@ impl ChatClient {
                 Ok(_) => {
                     let _ = self
                         .controller_send
-                        .send(NodeEvent::SentPacket(packet.clone()));
+                        .send(NodeEvent::PacketSent(packet.clone()));
                     Ok(())
                 }
                 Err(_) => Err("Something wrong with the sender"),
@@ -648,6 +656,8 @@ impl ChatClient {
             }
             NackType::ErrorInRouting(id) => {
                 // println!("Error in routing nacked");
+                //Could be a drone in crash mode so remove the node id from topology and update it
+                self.client_topology.remove_node(id);
 
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
                     //update the path since it might mean a drone has crashed or bad routing
@@ -724,11 +734,7 @@ impl ChatClient {
         return Err("No match found for session_id and fragment_index");
     }
 
-    pub fn recv_ack_n_handle(
-        &mut self,
-        session_id: u64,
-        fragment_index: u64,
-    ) -> Result<(), &str> {
+    pub fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
         if let Some(holder) = { self.holder_sent.get(&(session_id, self.id)) } {
             if holder.is_empty() && fragment_index == 0 {
                 return Err("All fragments of corrisponding message have been received");
@@ -996,7 +1002,6 @@ mod tests {
         }
         assert_eq!(1, 2);
     }
-
 }
 pub mod gui_test {
     use wg_2024::{controller::*, drone::Drone};

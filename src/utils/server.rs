@@ -2,7 +2,6 @@
 
 //  // “message.rs” holds ChatRequest, ChatResponse, Message<...>, etc.
 
-
 // use fragmentation_handling::ChatMessages;
 // use fragmentation_handling::Message::{ChatRequest, ChatResponse, DefaultsRequest, DroneSend, Message, Request, Response};
 // use crossbeam_channel::{Receiver, Sender, select_biased, RecvError};
@@ -99,11 +98,6 @@
 // //    [ ] Add comments linking each major function to its protocol spec location.
 // //      (✔️ Partial comments present; could add more explicit AP-protocol.md references)
 
-
-
-
-
-
 // pub enum ServerType{
 //     Content,
 //     Chat,
@@ -119,13 +113,11 @@
 //     //high‐level response enum
 //     type ResponseType: Response + DroneSend;
 
-
 //     /// Return the NodeId of this server.
 //     fn id(&self) -> NodeId;
 
 //     /// Channel on which incoming `Packet`s (fragments) arrive from neighbor drones.
 //     fn packet_recv(&self) -> &Receiver<Packet>;
-
 
 //     /// How to send a `Packet` to each neighbor drone (map: neighbor_id → Sender<Packet>).
 //     fn packet_send(&self) -> &HashMap<NodeId, crossbeam_channel::Sender<Packet>>;
@@ -141,7 +133,6 @@
 
 //     // Which `(flood_id, initiator_id)` pairs we’ve already processed (so we don’t re-flood).
 //     fn flood_ids(&mut self) -> &mut HashSet<(u64, NodeId)>;
-
 
 //     fn compose_message(
 //         source_id: NodeId,
@@ -168,10 +159,10 @@
 //                     // if you want to handle other DefaultsRequest variants here, do so…
 //                     // otherwise fall through to the ChatRequest logic below}
 //                 }
-                
+
 //             }
 //         }
-        
+
 //         match Self::compose_message(source_id, session_id, raw_content) {
 //             Ok(message) => {
 //                 let response = self.handle_request(message.content);
@@ -188,7 +179,6 @@
 //     fn handle_request(&mut self, request: Self::RequestType) -> Self::ResponseType;
 
 //     fn get_sever_type() -> ServerType;
-
 
 //     fn new(
 //         id: NodeId,
@@ -345,7 +335,6 @@
 //         }
 //     }
 
-
 //     fn handle_flood_response(&mut self, fr: FloodResponse, header: &SourceRoutingHeader){
 //         // merge entire path_trace into our topology
 
@@ -381,11 +370,7 @@
 
 //     }
 
-
-
 // }
-
-
 
 // pub struct ChatServer{
 //     id: NodeId,
@@ -399,7 +384,7 @@
 //     last_header: HashMap<(u64, NodeId), SourceRoutingHeader>,
 //     next_session_id: u64,
 //     sc_sender: Sender<DroneEvent>
-    
+
 // }
 
 // impl Server for ChatServer {
@@ -616,7 +601,6 @@
 
 //                         }
 
-
 //                     }
 //                     Err(_) => {
 //                         // Controller channel closed; shut down
@@ -828,16 +812,16 @@
 //                 }
 //             }
 //             PacketType::Ack(_) => {
-//                 // Servers typically do not need to re‐forward ACKs. 
+//                 // Servers typically do not need to re‐forward ACKs.
 //                 // clear retransmission buffers here if you kept any.
-                
+
 //             }
 //             PacketType::Nack(nack) => {
-//                 //if this is a DestinationIsDrone Nack... drop it 
+//                 //if this is a DestinationIsDrone Nack... drop it
 //                 if let NackType::DestinationIsDrone = nack.nack_type{
 //                     return;
 //                 }
-                
+
 //                 let mut header= pkt.routing_header.clone();
 
 //                 //verify correct hop or not
@@ -853,7 +837,7 @@
 //                 if header.hop_index == header.hops.len(){
 //                     return;
 //                 }
-                
+
 //                 //otherwise forward nack to next_hop
 //                 let next_hop = header.hops[header.hop_index];
 //                 let nack_pkt = Packet{
@@ -861,7 +845,7 @@
 //                     session_id: pkt.session_id,
 //                     pack_type: PacketType::Nack(nack.clone())
 //                 };
-                
+
 //                 if let Some(chan)= self.packet_send.get(&next_hop){
 //                     let _ =chan.send(nack_pkt);
 //                 }
@@ -881,7 +865,6 @@
 //         }
 //     }
 // }
-
 
 // fn main() {
 //     let mut server = ChatServer::new();

@@ -20,6 +20,7 @@ rusteze_drone = { git = "https://github.com/Rusteze-AP/drone.git" }
 dr_ones = { git = "https://github.com/Dr-Ones/drone" }
 rand = "0.8.5"
 bevy = "0.16.0"
+bevy_simple_text_input = "0.11.1"
 image = "0.24"
 bevy_egui = "0.34.1"
 rfd = "0.15.3"

@@ -1,4 +1,3 @@
-#![allow(unused)]
 use bevy::audio::AudioSource;
 use flate2::Compression;
 use flate2::bufread::{ZlibDecoder as BufDecoder, ZlibEncoder as BufEncoder};
@@ -319,7 +318,6 @@ pub enum DefaultsRequest {
     GETALLMEDIALINKS, //request all media links insede of content server
     GETALLAVAILABLE,  //get all client available for chatting
     GETSERVERTYPE,    //get servertype
-    GETCLIENTTYPE,    //consider removing it
 }
 
 impl DefaultsRequest {
@@ -359,11 +357,8 @@ impl Fragmentation<DefaultsRequest> for DefaultsRequest {
             DefaultsRequest::GETALLAVAILABLE => {
                 vec![DEFAULTBIT, 4]
             }
-            DefaultsRequest::GETCLIENTTYPE => {
-                vec![DEFAULTBIT, 5]
-            }
             DefaultsRequest::GETSERVERTYPE => {
-                vec![DEFAULTBIT, 6]
+                vec![DEFAULTBIT, 5]
             }
         }
     }
@@ -380,8 +375,7 @@ impl Assembler<DefaultsRequest> for DefaultsRequest {
                 2 => Ok(DefaultsRequest::GETALLTEXT),
                 3 => Ok(DefaultsRequest::GETALLMEDIALINKS),
                 4 => Ok(DefaultsRequest::GETALLAVAILABLE),
-                5 => Ok(DefaultsRequest::GETCLIENTTYPE),
-                6 => Ok(DefaultsRequest::GETSERVERTYPE),
+                5 => Ok(DefaultsRequest::GETSERVERTYPE),
                 _ => Err("Default request identifier does not match".to_string()),
             }
         }

@@ -1,11 +1,9 @@
-use std::{
-    collections::HashMap,
-    io::Cursor
-};
+use std::{collections::HashMap, io::Cursor};
 
 use bevy::prelude::*;
 use bevy_egui::{
-    egui::{self, Color32, ColorImage, RichText, TextureHandle}, EguiContexts, EguiPlugin
+    EguiContexts, EguiPlugin,
+    egui::{self, Color32, ColorImage, RichText, TextureHandle},
 };
 use crossbeam_channel::{Receiver, Sender};
 use image::DynamicImage;
@@ -18,6 +16,30 @@ use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 
 const TEXTSERVER: u8 = 1;
 const MEDIASERVER: u8 = 2;
+
+pub struct WebGuiPlugin {
+    pub channels: GuiControllers,
+}
+
+impl Plugin for WebGuiPlugin {
+    fn build(&self, app: &mut App) {
+        let (stream, handle) = rodio::OutputStream::try_default().unwrap();
+        let rodio_player = Box::new(RodioPlayer {
+            stream,
+            handle,
+            sinks: HashMap::new(),
+        });
+
+        app.add_plugins((EguiPlugin {
+            enable_multipass_for_primary_context: false,
+        },));
+        app.insert_resource(GuiControllers::new(self.channels.channels.clone()));
+        app.insert_resource(TextureCache::default());
+        app.insert_resource(MyRodioHandle(rodio_player)); // <- Make sure it's added
+        app.add_systems(Startup, setup);
+        app.add_systems(Update, ui_system);
+    }
+}
 
 pub fn main_gui(channels: HashMap<u8, GuiChannels>) {
     let (stream, handle) = rodio::OutputStream::try_default().unwrap();
@@ -69,7 +91,7 @@ pub struct TextureCache {
     map: HashMap<u64, TextureHandle>,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct GuiChannels {
     receiver: Receiver<WebEvent>,
     sender: Sender<WebCommand>,
@@ -111,7 +133,6 @@ pub struct WebPage {
     default: Vec<DefaultResponse>,
     content: Vec<ContentResponse>,
 }
-
 
 #[derive(Resource, Default, Clone)]
 pub struct ServerPanel {
@@ -157,7 +178,6 @@ pub fn ui_system(
     mut media_viewer: ResMut<MediaViewer>,
 ) {
     let ctx = egui_ctx.ctx_mut();
-
 
     egui::TopBottomPanel::bottom("no_match").show(ctx, |ui| {
         if ui.button("Error in Requests").clicked(){
@@ -281,13 +301,13 @@ pub fn ui_system(
                                                     }
                                                 }
                                             }
-                                        },
+                                        }
                                         _ => {}
                                     }
                                 }
                                 for msg in web_state.web_pages.content.clone() {
                                     match msg {
-                                        ContentResponse::TEXT(links)=> {
+                                        ContentResponse::TEXT(links) => {
                                             // if let Some(server) = servers
                                             //     .servers
                                             //     .iter()
@@ -303,8 +323,8 @@ pub fn ui_system(
                                             //             label.clone(),
                                             //         ));
                                             // }
-                                        },
-                                        _=>{}
+                                        }
+                                        _ => {}
                                     }
                                 }
                             });
@@ -380,9 +400,9 @@ pub fn ui_system(
                                                                 if let Ok(source) =
                                                                     Decoder::new(cursor)
                                                                 {
-                                                                    if let Ok( sink) = Sink::try_new(
-                                                                        &rodio_player.0.handle
-                                                                    ){
+                                                                    if let Ok(sink) = Sink::try_new(
+                                                                        &rodio_player.0.handle,
+                                                                    ) {
                                                                         sink.append(source);
                                                                         rodio_player
                                                                             .0
@@ -463,10 +483,7 @@ pub fn ui_system(
                 match event {
                     WebEvent::Servers(server_type, id) => {
                         if !servers.servers.iter().any(|s| s.id == id) {
-                            servers.servers.push(ServerInfo {
-                                id,
-                                server_type,
-                            });
+                            servers.servers.push(ServerInfo { id, server_type });
                         }
                     }
                     WebEvent::AllMedia(res) => {

@@ -21,7 +21,31 @@ use crate::{
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 
 include!(concat!(env!("OUT_DIR"), "/build_constants.rs"));
-const CHAT_PATH: &str = "/assets/chat/media/";
+const CHAT_PATH: &str = "assets/chat/media/";
+
+pub struct ChatGuiPlugin {
+    pub channels: GuiControllers,
+}
+impl Plugin for ChatGuiPlugin {
+    fn build(&self, app: &mut App) {
+        let (stream, handle) = rodio::OutputStream::try_default().unwrap();
+        let rodio_player = Box::new(RodioPlayer {
+            stream,
+            handle,
+            sinks: HashMap::new(),
+        });
+
+        app.add_plugins((EguiPlugin {
+            enable_multipass_for_primary_context: false,
+        },));
+        app.insert_resource(GuiControllers::new(self.channels.channels.clone()));
+        app.insert_resource(TextureCache::default());
+        app.insert_resource(MyRodioHandle(rodio_player));
+        app.insert_resource(Attachments::default()); // <- Make sure it's added
+        app.add_systems(Startup, setup);
+        app.add_systems(Update, ui_system);
+    }
+}
 pub fn main_gui(channels: HashMap<u8, GuiChannels>) {
     let (stream, handle) = rodio::OutputStream::try_default().unwrap();
     let rodio_player = Box::new(RodioPlayer {
@@ -46,7 +70,7 @@ pub fn main_gui(channels: HashMap<u8, GuiChannels>) {
         .run();
 }
 
-#[derive(Resource,Clone)]
+#[derive(Resource, Clone)]
 pub struct Attachments {
     images: Vec<String>,
     audio: Vec<String>,
@@ -56,8 +80,36 @@ impl Default for Attachments {
     fn default() -> Self {
         let mut images = Vec::new();
         let mut audio = Vec::new();
-        let image_path = CHAT_PATH.to_string() + "image/";
-        let audio_path = CHAT_PATH.to_string() + "audio/";
+        let image_path = std::env::current_exe()
+            .expect("Faild to get exe path")
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .join(CHAT_PATH.to_string() + "image/")
+            .to_str()
+            .unwrap()
+            .to_string();
+        let audio_path = std::env::current_exe()
+            .expect("Faild to get exe path")
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .parent()
+            .unwrap()
+            .to_path_buf()
+            .join(CHAT_PATH.to_string() + "audio/")
+            .to_str()
+            .unwrap()
+            .to_string();
         if let Ok(reader) = fs::read_dir(image_path) {
             for entry_res in reader {
                 if let Ok(entry) = entry_res {
@@ -109,7 +161,7 @@ pub struct TextureCache {
     map: HashMap<u64, TextureHandle>,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct GuiChannels {
     receiver: Receiver<ChatEvent>,
     sender: Sender<ChatCommand>,
@@ -205,58 +257,49 @@ pub fn ui_system(
     channels: ResMut<GuiControllers>,
     mut rodio_player: ResMut<MyRodioHandle>,
     attachments: Res<Attachments>,
+    mut state: ResMut<super::MainState>,
 ) {
     let ctx = egui_ctx.ctx_mut();
 
-    // Header
-    egui::TopBottomPanel::top("header_panel").show(ctx, |ui| {
-        ui.horizontal_centered(|ui| {
-            ui.heading("ChatApp Multi-Client");
-            if ui.button("Start").clicked() {
-                for (_id, gui_c) in &channels.channels {
-                    let _ = gui_c.sender.send(ChatCommand::GetServersType);
+    if let super::MainState::Chat = *state {
+        // Left: Clients & Contacts
+        egui::SidePanel::left("left_panel").show(ctx, |ui| {
+            ui.vertical(|ui| {
+                ui.heading("Clients");
+                for (id, gui_c) in &channels.channels {
+                    if !app_state.client_states.contains_key(&id) {
+                        app_state
+                            .client_states
+                            .insert(*id, ClientViewState::default());
+                    }
+                    if ui.button(format!("Client {}", id)).clicked() {
+                        app_state.selected_source_client = Some(*id);
+                        app_state.client_states.entry(*id).or_default();
+                        let _ = gui_c.sender.send(ChatCommand::GetServersType);
+                    }
                 }
-            }
-        });
-    });
 
-    // Left: Clients & Contacts
-    egui::SidePanel::left("left_panel").show(ctx, |ui| {
-        ui.vertical(|ui| {
-            ui.heading("Clients");
-            for (id, gui_c) in &channels.channels {
-                if !app_state.client_states.contains_key(&id) {
-                    app_state
-                        .client_states
-                        .insert(*id, ClientViewState::default());
-                }
-                if ui.button(format!("Client {}", id)).clicked() {
-                    app_state.selected_source_client = Some(*id);
-                    app_state.client_states.entry(*id).or_default();
-                    let _ = gui_c.sender.send(ChatCommand::GetServersType);
-                }
-            }
-
-            if let Some(client_id) = app_state.selected_source_client {
-                let client_state = app_state.client_states.get_mut(&client_id).unwrap();
-                if let Some(server_id) = client_state.selected_server {
-                    if let Some(server) = servers.servers.iter().find(|s| {
-                        s.id == server_id
-                            && s.selected
-                            && *s.registered.get(&client_id).unwrap_or(&false)
-                    }) {
-                        if let Some(contacts) = server.contacts.clients.get(&server.id) {
-                            ui.separator();
-                            ui.label("Contacts:");
-                            for (contact_id, _) in contacts {
-                                if *contact_id != client_id {
-                                    let text = format!("Chat with {}", contact_id);
-                                    if ui.button(text).clicked() {
-                                        // Could update selected chat contact
-                                        if client_state.selected_client == Some(*contact_id) {
-                                            ui.label(format!("Chating with {}", contact_id));
-                                        } else {
-                                            client_state.selected_client = Some(*contact_id);
+                if let Some(client_id) = app_state.selected_source_client {
+                    let client_state = app_state.client_states.get_mut(&client_id).unwrap();
+                    if let Some(server_id) = client_state.selected_server {
+                        if let Some(server) = servers.servers.iter().find(|s| {
+                            s.id == server_id
+                                && s.selected
+                                && *s.registered.get(&client_id).unwrap_or(&false)
+                        }) {
+                            if let Some(contacts) = server.contacts.clients.get(&server.id) {
+                                ui.separator();
+                                ui.label("Contacts:");
+                                for (contact_id, _) in contacts {
+                                    if *contact_id != client_id {
+                                        let text = format!("Chat with {}", contact_id);
+                                        if ui.button(text).clicked() {
+                                            // Could update selected chat contact
+                                            if client_state.selected_client == Some(*contact_id) {
+                                                ui.label(format!("Chating with {}", contact_id));
+                                            } else {
+                                                client_state.selected_client = Some(*contact_id);
+                                            }
                                         }
                                     }
                                 }
@@ -264,329 +307,340 @@ pub fn ui_system(
                         }
                     }
                 }
-            }
+            });
         });
-    });
 
-    // Right: Servers
-    egui::SidePanel::right("right_panel").show(ctx, |ui| {
-        ui.heading("Servers");
-        if let Some(client_id) = app_state.selected_source_client {
-            for server in &mut servers.servers {
-                let label = if server.selected {
-                    format!("▶ {}", server.id)
-                } else {
-                    format!("{}", server.id)
-                };
-
-                if *server.registered.get(&client_id).unwrap_or(&false) {
-                    if ui.button(label).clicked() {
-                        server.selected = true;
-                        app_state
-                            .client_states
-                            .get_mut(&client_id)
-                            .unwrap()
-                            .selected_server = Some(server.id);
-
-                        let _ = channels
-                            .channels
-                            .get(&client_id)
-                            .unwrap()
-                            .sender
-                            .send(ChatCommand::GetClients(server.id));
-                    }
-                } else {
-                    if ui.button(format!("{}\nRegister", server.id)).clicked() {
-                        let _ = channels
-                            .channels
-                            .get(&client_id)
-                            .unwrap()
-                            .sender
-                            .send(ChatCommand::RegisterTo(server.id));
-                    }
-                }
-            }
-        } else {
-            ui.label("Select a client to view servers.");
-        }
-    });
-
-    // Center: Chat history
-    egui::CentralPanel::default().show(ctx, |ui| {
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        // Right: Servers
+        egui::SidePanel::right("right_panel").show(ctx, |ui| {
+            ui.heading("Servers");
             if let Some(client_id) = app_state.selected_source_client {
-                if let Some(state) = app_state.client_states.get_mut(&client_id) {
-                    if let Some(contact) = state.selected_client {
-                        if let Some(chat_page) = state.chat_pages.get_mut(&contact) {
-                            ui.heading(format!("Chat with {}", contact));
-                            for (i, pos, msg) in &chat_page.messages {
-                                let mut position = None;
-                                if *pos == SENT {
-                                    position = Some(egui::Layout::right_to_left(egui::Align::Min));
-                                }
-                                if *pos == RECV {
-                                    position = Some(egui::Layout::left_to_right(egui::Align::Min))
-                                }
+                let mut selected = app_state
+                    .client_states
+                    .get(&client_id)
+                    .unwrap()
+                    .selected_server
+                    .unwrap_or(0);
+                for server in &mut servers.servers {
+                    let label = if server.selected {
+                        format!("▶ {}", server.id)
+                    } else {
+                        format!("{}", server.id)
+                    };
+                    if selected != server.id {
+                        server.selected = false;
+                    }
+                    if *server.registered.get(&client_id).unwrap_or(&false) {
+                        if ui.button(label).clicked() {
+                            selected = server.id;
+                            server.selected = true;
+                            app_state
+                                .client_states
+                                .get_mut(&client_id)
+                                .unwrap()
+                                .selected_server = Some(server.id);
 
-                                ui.with_layout(position.unwrap(), |ui| match msg {
-                                    ChatMessages::CHATSTRING(_, _, _, s) => {
-                                        ui.label(s);
-                                    }
-                                    ChatMessages::CHATIMAGE(_, _, _, img) => {
-                                        let id = img_hash(img);
-                                        let texture =
-                                            handle_incoming_image(img, ctx, &mut cache, id);
-                                        let size = egui::Vec2::new(
-                                            img.width() as f32 / 2.0,
-                                            img.height() as f32 / 2.0,
-                                        );
-                                        ui.add(egui::Image::new(&texture).fit_to_exact_size(size));
-                                    }
-                                    ChatMessages::CHATAUDIO(_, _, _, track) => {
-                                        ui.horizontal(|ui| {
-                                            ui.label("🔊 Audio message");
-                                            if ui.button("▶ Play").clicked() {
-                                                if let Some(track_bytes) = Some(&track.bytes) {
-                                                    let cursor = Cursor::new(track_bytes.clone());
-
-                                                    if let Ok(source) = Decoder::new(cursor) {
-                                                        let sink =
-                                                            Sink::try_new(&rodio_player.0.handle)
-                                                                .unwrap();
-                                                        sink.append(source);
-                                                        rodio_player.0.sinks.insert(*i, sink);
-                                                    } else {
-                                                        error!("Failed to decode audio");
-                                                    }
-                                                }
-                                            }
-
-                                            if ui.button("⏸ Pause").clicked() {
-                                                if let Some(sink) = rodio_player.0.sinks.get(i) {
-                                                    sink.pause();
-                                                }
-                                            }
-
-                                            if ui.button("⏹ Stop").clicked() {
-                                                if let Some(sink) = rodio_player.0.sinks.remove(i) {
-                                                    sink.stop();
-                                                }
-                                            }
-                                        });
-                                    }
-                                });
-                            }
+                            let _ = channels
+                                .channels
+                                .get(&client_id)
+                                .unwrap()
+                                .sender
+                                .send(ChatCommand::GetClients(server.id));
+                        }
+                    } else {
+                        if ui.button(format!("{}\nRegister", server.id)).clicked() {
+                            let _ = channels
+                                .channels
+                                .get(&client_id)
+                                .unwrap()
+                                .sender
+                                .send(ChatCommand::RegisterTo(server.id));
                         }
                     }
                 }
             } else {
-                ui.label("Select a client.");
+                ui.label("Select a client to view servers.");
             }
         });
-    });
 
-    // Bottom: Input bar
-    egui::TopBottomPanel::bottom("input_panel").show(ctx, |ui| {
-        if let Some(client_id) = app_state.selected_source_client {
-            if let Some(state) = app_state.client_states.get_mut(&client_id) {
-                if let Some(contact) = state.selected_client {
-                    let text = state.input.entry(contact).or_default();
-                    let time = chrono::Local::now();
-                    let str = time.format("%d%H%M").to_string();
-                    let mut int = 0;
-                    for (i, c) in str.chars().rev().enumerate() {
-                        int = int + ((c as u64 - '0' as u64) * (10_u64.pow(i as u32)) as u64);
-                    }
-                    ui.horizontal(|ui| {
-                        ui.text_edit_singleline(text);
-                        if ui.button("📎").clicked() {
-                            state.attachments_state = true;
-                        }
-                        if state.attachments_state {
-                            egui::Window::new("Attachments")
-                            .default_size(bevy_egui::egui::Vec2::new(400.,300.))
-                            .collapsible(true)
-                            .resizable(true)
-                            .show(ctx, |ui|{
-                                ui.columns(2, |columns| {
-                                    if let Some(server_id) = state.selected_server {
-                                        egui::ScrollArea::vertical()
-                                        .id_salt("Images")
-                                        .show(&mut columns[0], |ui|{
-                                            for img in &attachments.images {
-                                                ui.label(img.to_string());
-                                                if ui.button("Send").clicked() {
-                                                    let file_path=PROJECT_DIR.to_string() + CHAT_PATH + "image/" + img;
-                                                    let image =
-                                                        image::open(file_path).expect("NOT OPENED");
-                                                    let msg = ChatMessages::new_image_msg(
-                                                        client_id,
-                                                        server_id,
-                                                        contact,
-                                                        image.clone(),
-                                                    );
-                                                    let _ = channels
-                                                        .channels
-                                                        .get(&client_id)
-                                                        .unwrap()
-                                                        .sender
-                                                        .send(ChatCommand::SendMessage(
-                                                            server_id,
-                                                            Message::ChatMessages(msg.clone()),
-                                                        ));
-                                                    state.attachments_state=false;
-                                                    let entry = state
-                                                        .chat_pages
-                                                        .entry(contact)
-                                                        .or_insert_with(|| ChatPage {
-                                                            contact_id: contact,
-                                                            messages: Vec::new(),
-                                                        });
-                                                    entry.messages.push((int, SENT, msg));
-                                                    
-                                                }
-                                            }
-                                        });
-                                        egui::ScrollArea::vertical()
-                                        .id_salt("Images")
-                                        .show(&mut columns[1], |ui|{
-                                            for track in &attachments.audio {
-                                                ui.label(track.to_string());
-                                                if ui.button("Send").clicked() {
-                                                    let file_path = PROJECT_DIR.to_string() + CHAT_PATH + "audio/" + track;
-                                                    let data = fs::read(file_path).expect("NOT OPENED");
-                                                    let audio = AudioSource {
-                                                        bytes: Arc::from(data),
-                                                    };
-                                                    let msg = ChatMessages::new_audio_msg(
-                                                        client_id,
-                                                        server_id,
-                                                        contact,
-                                                        audio.clone(),
-                                                    );
-                                                    let _ = channels
-                                                        .channels
-                                                        .get(&client_id)
-                                                        .unwrap()
-                                                        .sender
-                                                        .send(ChatCommand::SendMessage(
-                                                            server_id,
-                                                            Message::ChatMessages(msg.clone()),
-                                                        ));
-                                                    state.attachments_state=false;
-                                                    let entry = state
-                                                        .chat_pages
-                                                        .entry(contact)
-                                                        .or_insert_with(|| ChatPage {
-                                                            contact_id: contact,
-                                                            messages: Vec::new(),
-                                                        });
-                                                    entry.messages.push((int, SENT, msg));
-                                                }
-                                            }
-                                        });
+        // Center: Chat history
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                if let Some(client_id) = app_state.selected_source_client {
+                    if let Some(state) = app_state.client_states.get_mut(&client_id) {
+                        if let Some(contact) = state.selected_client {
+                            if let Some(chat_page) = state.chat_pages.get_mut(&contact) {
+                                ui.heading(format!("Chat with {}", contact));
+                                for (i, pos, msg) in &chat_page.messages {
+                                    let mut position = None;
+                                    if *pos == SENT {
+                                        position =
+                                            Some(egui::Layout::right_to_left(egui::Align::Min));
                                     }
-                                });
-                            }); 
+                                    if *pos == RECV {
+                                        position =
+                                            Some(egui::Layout::left_to_right(egui::Align::Min))
+                                    }
 
-                        }
-                        //     if let Some(file) =
-                        //         rfd::FileDialog::new().set_directory(CHAT_PATH).pick_file()
-                        //     {
-                        //         if let Some(server_id) = state.selected_server {
-                        //             if let Some(str) = file.clone().to_str() {
-                        //                 if str.contains("image") {
-                        //                     let image =
-                        //                         image::open(file.clone()).expect("NOT OPENED");
-                        //                     let msg = ChatMessages::new_image_msg(
-                        //                         client_id,
-                        //                         server_id,
-                        //                         contact,
-                        //                         image.clone(),
-                        //                     );
-                        //                     let _ = channels
-                        //                         .channels
-                        //                         .get(&client_id)
-                        //                         .unwrap()
-                        //                         .sender
-                        //                         .send(ChatCommand::SendMessage(
-                        //                             server_id,
-                        //                             Message::ChatMessages(msg.clone()),
-                        //                         ));
-                        //                     let entry = state
-                        //                         .chat_pages
-                        //                         .entry(contact)
-                        //                         .or_insert_with(|| ChatPage {
-                        //                             contact_id: contact,
-                        //                             messages: Vec::new(),
-                        //                         });
-                        //                     entry.messages.push((int, SENT, msg));
-                        //                 }
-                        //                 if str.contains("audio") {
-                        //                     let data = fs::read(file.clone()).expect("NOT OPENED");
-                        //                     let audio = AudioSource {
-                        //                         bytes: Arc::from(data),
-                        //                     };
-                        //                     let msg = ChatMessages::new_audio_msg(
-                        //                         client_id,
-                        //                         server_id,
-                        //                         contact,
-                        //                         audio.clone(),
-                        //                     );
-                        //                     let _ = channels
-                        //                         .channels
-                        //                         .get(&client_id)
-                        //                         .unwrap()
-                        //                         .sender
-                        //                         .send(ChatCommand::SendMessage(
-                        //                             server_id,
-                        //                             Message::ChatMessages(msg.clone()),
-                        //                         ));
-                        //                     let entry = state
-                        //                         .chat_pages
-                        //                         .entry(contact)
-                        //                         .or_insert_with(|| ChatPage {
-                        //                             contact_id: contact,
-                        //                             messages: Vec::new(),
-                        //                         });
-                        //                     entry.messages.push((int, SENT, msg));
-                        //                 }
-                        //             }
-                        //         }
-                        //     }
-                        // }
-                        if ui.button("Send").clicked() {
-                            if let Some(server_id) = state.selected_server {
-                                if !text.is_empty() {
-                                    let msg = ChatMessages::new_string_msg(
-                                        client_id,
-                                        server_id,
-                                        contact,
-                                        text.clone(),
-                                    );
-                                    let _ = channels.channels.get(&client_id).unwrap().sender.send(
-                                        ChatCommand::SendMessage(
-                                            server_id,
-                                            Message::ChatMessages(msg.clone()),
-                                        ),
-                                    );
-                                    let entry =
-                                        state.chat_pages.entry(contact).or_insert_with(|| {
-                                            ChatPage {
-                                                contact_id: contact,
-                                                messages: Vec::new(),
-                                            }
-                                        });
-                                    entry.messages.push((int, SENT, msg));
-                                    text.clear();
+                                    ui.with_layout(position.unwrap(), |ui| match msg {
+                                        ChatMessages::CHATSTRING(_, _, _, s) => {
+                                            ui.label(s);
+                                        }
+                                        ChatMessages::CHATIMAGE(_, _, _, img) => {
+                                            let id = img_hash(img);
+                                            let texture =
+                                                handle_incoming_image(img, ctx, &mut cache, id);
+                                            let size = egui::Vec2::new(
+                                                img.width() as f32 / 2.0,
+                                                img.height() as f32 / 2.0,
+                                            );
+                                            ui.add(
+                                                egui::Image::new(&texture).fit_to_exact_size(size),
+                                            );
+                                        }
+                                        ChatMessages::CHATAUDIO(_, _, _, track) => {
+                                            ui.horizontal(|ui| {
+                                                ui.label("🔊 Audio message");
+                                                if ui.button("▶ Play").clicked() {
+                                                    if let Some(track_bytes) = Some(&track.bytes) {
+                                                        let cursor =
+                                                            Cursor::new(track_bytes.clone());
+
+                                                        if let Ok(source) = Decoder::new(cursor) {
+                                                            let sink = Sink::try_new(
+                                                                &rodio_player.0.handle,
+                                                            )
+                                                            .unwrap();
+                                                            sink.append(source);
+                                                            rodio_player.0.sinks.insert(*i, sink);
+                                                        } else {
+                                                            error!("Failed to decode audio");
+                                                        }
+                                                    }
+                                                }
+
+                                                if ui.button("⏸ Pause").clicked() {
+                                                    if let Some(sink) = rodio_player.0.sinks.get(i)
+                                                    {
+                                                        sink.pause();
+                                                    }
+                                                }
+
+                                                if ui.button("⏹ Stop").clicked() {
+                                                    if let Some(sink) =
+                                                        rodio_player.0.sinks.remove(i)
+                                                    {
+                                                        sink.stop();
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    });
                                 }
                             }
                         }
-                    });
+                    }
+                } else {
+                    ui.label("Select a client.");
+                }
+            });
+        });
+
+        // Bottom: Input bar
+        egui::TopBottomPanel::bottom("input_panel").show(ctx, |ui| {
+            if let Some(client_id) = app_state.selected_source_client {
+                if let Some(state) = app_state.client_states.get_mut(&client_id) {
+                    if let Some(contact) = state.selected_client {
+                        let text = state.input.entry(contact).or_default();
+                        let time = chrono::Local::now();
+                        let str = time.format("%d%H%M").to_string();
+                        let mut int = 0;
+                        for (i, c) in str.chars().rev().enumerate() {
+                            int = int + ((c as u64 - '0' as u64) * (10_u64.pow(i as u32)) as u64);
+                        }
+                        ui.horizontal(|ui| {
+                            ui.text_edit_singleline(text);
+                            if ui.button("📎").clicked() {
+                                state.attachments_state = true;
+                            }
+                            if state.attachments_state {
+                                egui::Window::new("Attachments")
+                                    .default_size(bevy_egui::egui::Vec2::new(400., 300.))
+                                    .collapsible(true)
+                                    .resizable(true)
+                                    .show(ctx, |ui| {
+                                        ui.columns(2, |columns| {
+                                            if let Some(server_id) = state.selected_server {
+                                                egui::ScrollArea::vertical()
+                                                    .id_salt("Images")
+                                                    .show(&mut columns[0], |ui| {
+                                                        for img in &attachments.images {
+                                                            ui.label(img.to_string());
+                                                            if ui.button("Send").clicked() {
+                                                                let file_path =
+                                                                    std::env::current_exe()
+                                                                        .expect(
+                                                                            "Faild to get exe path",
+                                                                        )
+                                                                        .parent()
+                                                                        .unwrap()
+                                                                        .to_path_buf()
+                                                                        .parent()
+                                                                        .unwrap()
+                                                                        .to_path_buf()
+                                                                        .parent()
+                                                                        .unwrap()
+                                                                        .to_path_buf()
+                                                                        .join(
+                                                                            CHAT_PATH.to_string()
+                                                                                + "image/"
+                                                                                + img,
+                                                                        )
+                                                                        .to_str()
+                                                                        .unwrap()
+                                                                        .to_string();
+
+                                                                let image = image::open(file_path)
+                                                                    .expect("NOT OPENED");
+                                                                let msg =
+                                                                    ChatMessages::new_image_msg(
+                                                                        client_id,
+                                                                        server_id,
+                                                                        contact,
+                                                                        image.clone(),
+                                                                    );
+                                                                let _ = channels
+                                                                    .channels
+                                                                    .get(&client_id)
+                                                                    .unwrap()
+                                                                    .sender
+                                                                    .send(
+                                                                        ChatCommand::SendMessage(
+                                                                            server_id,
+                                                                            Message::ChatMessages(
+                                                                                msg.clone(),
+                                                                            ),
+                                                                        ),
+                                                                    );
+                                                                state.attachments_state = false;
+                                                                let entry = state
+                                                                    .chat_pages
+                                                                    .entry(contact)
+                                                                    .or_insert_with(|| ChatPage {
+                                                                        contact_id: contact,
+                                                                        messages: Vec::new(),
+                                                                    });
+                                                                entry
+                                                                    .messages
+                                                                    .push((int, SENT, msg));
+                                                            }
+                                                        }
+                                                    });
+                                                egui::ScrollArea::vertical()
+                                                    .id_salt("Images")
+                                                    .show(&mut columns[1], |ui| {
+                                                        for track in &attachments.audio {
+                                                            ui.label(track.to_string());
+                                                            if ui.button("Send").clicked() {
+                                                                let file_path =
+                                                                    std::env::current_exe()
+                                                                        .expect(
+                                                                            "Faild to get exe path",
+                                                                        )
+                                                                        .parent()
+                                                                        .unwrap()
+                                                                        .to_path_buf()
+                                                                        .parent()
+                                                                        .unwrap()
+                                                                        .to_path_buf()
+                                                                        .parent()
+                                                                        .unwrap()
+                                                                        .to_path_buf()
+                                                                        .join(
+                                                                            CHAT_PATH.to_string()
+                                                                                + "audio/"
+                                                                                + track,
+                                                                        )
+                                                                        .to_str()
+                                                                        .unwrap()
+                                                                        .to_string();
+                                                                let data = fs::read(file_path)
+                                                                    .expect("NOT OPENED");
+                                                                let audio = AudioSource {
+                                                                    bytes: Arc::from(data),
+                                                                };
+                                                                let msg =
+                                                                    ChatMessages::new_audio_msg(
+                                                                        client_id,
+                                                                        server_id,
+                                                                        contact,
+                                                                        audio.clone(),
+                                                                    );
+                                                                let _ = channels
+                                                                    .channels
+                                                                    .get(&client_id)
+                                                                    .unwrap()
+                                                                    .sender
+                                                                    .send(
+                                                                        ChatCommand::SendMessage(
+                                                                            server_id,
+                                                                            Message::ChatMessages(
+                                                                                msg.clone(),
+                                                                            ),
+                                                                        ),
+                                                                    );
+                                                                state.attachments_state = false;
+                                                                let entry = state
+                                                                    .chat_pages
+                                                                    .entry(contact)
+                                                                    .or_insert_with(|| ChatPage {
+                                                                        contact_id: contact,
+                                                                        messages: Vec::new(),
+                                                                    });
+                                                                entry
+                                                                    .messages
+                                                                    .push((int, SENT, msg));
+                                                            }
+                                                        }
+                                                    });
+                                            }
+                                        });
+                                    });
+                            }
+
+                            if ui.button("Send").clicked() {
+                                if let Some(server_id) = state.selected_server {
+                                    if !text.is_empty() {
+                                        let msg = ChatMessages::new_string_msg(
+                                            client_id,
+                                            server_id,
+                                            contact,
+                                            text.clone(),
+                                        );
+                                        let _ =
+                                            channels.channels.get(&client_id).unwrap().sender.send(
+                                                ChatCommand::SendMessage(
+                                                    server_id,
+                                                    Message::ChatMessages(msg.clone()),
+                                                ),
+                                            );
+                                        let entry =
+                                            state.chat_pages.entry(contact).or_insert_with(|| {
+                                                ChatPage {
+                                                    contact_id: contact,
+                                                    messages: Vec::new(),
+                                                }
+                                            });
+                                        entry.messages.push((int, SENT, msg));
+                                        text.clear();
+                                    }
+                                }
+                            }
+                        });
+                    }
                 }
             }
-        }
-    });
+        });
+    };
     // Handle incoming events
     if let Some(cli) = app_state.selected_source_client {
         while let Ok(event) = channels.channels.get(&cli).unwrap().receiver.try_recv() {
@@ -603,8 +657,9 @@ pub fn ui_system(
                 }
                 ChatEvent::Registered(id) => {
                     for server in servers.servers.iter_mut() {
-                        server.registered.insert(cli, true);
-                        server.selected = server.id == id;
+                        if server.id == id {
+                            server.registered.insert(cli, true);
+                        }
                     }
                 }
                 ChatEvent::Clients(ids) => {
