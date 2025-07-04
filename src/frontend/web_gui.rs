@@ -336,6 +336,24 @@ pub fn ui_system(
                                                                 info!("SentGetText");
                                                             }
                                                         }
+                                                        if label.contains("media/"){
+                                                            if let Some(server) = servers
+                                                            .servers
+                                                            .iter()
+                                                            .find(|s| s.server_type == MEDIASERVER)
+                                                            {   
+                                                                let _ = channels
+                                                                .channels
+                                                                .get(&client_id)
+                                                                .unwrap()
+                                                                .sender
+                                                                .send(WebCommand::GetMedia(
+                                                                    server.id,
+                                                                    label.clone(),
+                                                                ));
+                                                                info!("SentGetMedia");
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
