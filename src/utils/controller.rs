@@ -189,5 +189,6 @@ impl Plugin for SimulationControllerPlugin {
         app.add_observer(reset_highlight);
         app.add_observer(connect_nodes);
         app.add_observer(change_pdr_target);
+        app.add_observer(change_spawn_target);
     }
 }

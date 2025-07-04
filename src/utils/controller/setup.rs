@@ -416,8 +416,9 @@ pub fn setup_ui(mut commands: Commands, state: Res<MainState>) {
                                     });
                             });
 
-                        parent
-                            .spawn(Node {
+                       parent
+                        .spawn(( //<--------------
+                            Node {
                                 width: Val::Percent(100.0),
                                 //height: Val::Percent(0.0),
                                 flex_direction: FlexDirection::Row,
@@ -425,11 +426,18 @@ pub fn setup_ui(mut commands: Commands, state: Res<MainState>) {
                                 justify_content: JustifyContent::Center,
                                 padding: UiRect::vertical(Val::Percent(2.0)),
                                 ..default()
-                            })
-                            .with_children(|parent| {
-                                parent.spawn((TextWarn, Text::new(""), TextColor(warn_color)));
-                            });
+                            },
+                            Pickable::IGNORE, //<------------------
+                        )).with_children(|parent| { //<-----------------
+                        parent.spawn((
+                            TextWarn,
+                            Text::new(""),
+                            TextColor(warn_color),
+                        ));
                     });
-            });
+
+
+                });
+        });
     }
 }

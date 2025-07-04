@@ -14,6 +14,7 @@ pub struct MakeLinesEvent;
 #[derive(Event)]
 pub struct SpawnDroneEvent {
     pub id: u8,
+    pub connect_to: Entity,
 }
 
 #[derive(Event)]
@@ -124,3 +125,4 @@ pub struct PacketMotion {
     pub end: Vec3,
     pub progress: f32,
 }
+
