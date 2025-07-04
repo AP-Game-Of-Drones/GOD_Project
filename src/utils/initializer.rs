@@ -1,33 +1,27 @@
 #![allow(dead_code)]
 use crate::{
-    frontend::{self, ChatCommand, ChatEvent, WebCommand, WebEvent},
+    frontend::{ChatCommand, ChatEvent, WebCommand, WebEvent},
     utils::{
-        backup_server,
         client::{chat_client::ChatClient, web_browser::WebBrowser},
         controller::{NodeCommand, NodeEvent},
     },
 };
-use bevy::scene::ron::error;
 use crossbeam_channel::*;
 use rand::*;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    fs,
-    hash::Hash,
-    sync::{Arc, Mutex},
-    thread::{self, JoinHandle},
+    collections::{HashMap, HashSet, VecDeque}, fs, io::Write, path::PathBuf, thread::{self, JoinHandle}
 };
 use toml::{self};
 use wg_2024::{
-    config::Config,
+    config::{Client, Config, Server},
     controller::{DroneCommand, DroneEvent},
     drone::Drone,
     network::NodeId,
-    packet::{NodeType, Packet},
+    packet::Packet,
 };
 
 use super::backup_server::*;
-use super::client::*;
+
 
 fn parse_config(file: &str) -> Config {
     println!("{file}");
@@ -38,33 +32,8 @@ fn parse_config(file: &str) -> Config {
 const CHATAPP: u8 = 0;
 const WEBAPP: u8 = 1;
 
-fn helper3(config: &Config) -> u8 {
-    let s_len = config.server.len();
-    let c_len = config.client.len();
-    let mut val = 0;
-    let mut rng = rand::thread_rng();
-    val = rng.r#gen::<u8>();
-    let mut res = 0;
-    if c_len == 1 {
-        res = WEBAPP;
-    } else if c_len == 2 {
-        if s_len == 1 || s_len == 2 {
-            res = CHATAPP;
-        } else if s_len > 2 {
-            res = val % 2;
-        }
-    } else if c_len > 3 {
-        if s_len <= 3 {
-            res = CHATAPP
-        } else if s_len >= 4 {
-            res = val % 2;
-        }
-    }
-    res
-}
-
 fn helper1(counters: &mut [i32]) -> usize {
-    let mut val = 0;
+    let mut val ;
     loop {
         let mut rng = rand::thread_rng();
         val = rng.r#gen::<usize>() % 10;
@@ -92,6 +61,99 @@ fn helper2(counters: &mut [i32]) -> usize {
         }
     }
     val
+}
+
+fn helper3(config: &Config) -> u8 {
+    let s_len = config.server.len();
+    let c_len = config.client.len();
+    let mut rng = rand::thread_rng();
+    let val = rng.r#gen::<u8>();
+    let mut res = 0;
+    if c_len == 1 {
+        res = WEBAPP;
+    } else if c_len == 2 {
+        if s_len == 1 || s_len == 2 {
+            res = CHATAPP;
+        } else if s_len > 2 {
+            res = val % 2;
+        }
+    } else if c_len > 3 {
+        if s_len <= 3 {
+            res = CHATAPP
+        } else if s_len >= 4 {
+            res = val % 2;
+        }
+    }
+    res
+}
+
+pub fn choose_config_cli()->(PathBuf,bool){
+    let config_path = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+        .join("configs/");
+    println!("Chose from the following configuration files by entering the corresponding number");    
+    let reader = std::fs::read_dir(config_path).expect("No config dir found");
+    let configs = reader.into_iter().enumerate().map(|(i,c)| (i,c.ok().unwrap().path())).collect::<HashMap<usize,PathBuf>>();
+    for (i, entry) in &configs {
+        println!("{}\t{}", i, entry.to_string_lossy());
+    }
+
+    std::io::stdout().flush().unwrap();
+
+    loop {
+        print!("Choose a config by number: ");
+        std::io::stdout().flush().unwrap();
+
+        let mut num = String::new();
+        std::io::stdin().read_line(&mut num).unwrap();
+
+        // Try to parse input to a number
+        match num.trim().parse::<usize>() {
+            Ok(n) => {
+                if let Some(c) = configs.get(&n) {
+                    println!("Chosen: {}", c.to_string_lossy());
+                    if check_initializer(c.to_str().unwrap()) {
+                        println!("Choose 1 to use just one impl for the drones, choose 2 for multiple impl");
+                        std::io::stdout().flush().unwrap();
+                        let mut str = String::new();
+                        std::io::stdin().read_line(&mut str).unwrap();
+                        match str.trim().parse::<u8>(){
+                            Ok(m) => {
+                                if m == 1 {
+                                    return (c.clone(),true);
+                                } else if m == 2 {
+                                    return (c.clone(),false);
+                                } else {
+                                    println!("Chose between 1 and 2");
+                                }
+                            },
+                            Err(_)=>{
+                                println!("Enter a valid number");
+                            }
+                        }
+                    } else {
+                        println!("Config file doesn't respect protocol")
+                    }
+                } else {
+                    println!("Invalid number: No config at index {}", n);
+                }
+            }
+            Err(_) => {
+                println!("Please enter a valid number.");
+            }
+        }
+    }
+        
+
 }
 
 fn build(
@@ -294,7 +356,7 @@ fn build_and_run_server(
     if app_value == CHATAPP {
         serv_type = super::backup_server::CHATSERVER;
         thread::spawn(move || {
-            let mut server = Server::new(
+            let mut server = super::backup_server::Server::new(
                 id,
                 serv_type,
                 controller_send,
@@ -313,7 +375,7 @@ fn build_and_run_server(
             serv_type = 1;
         }
         thread::spawn(move || {
-            let mut server = Server::new(
+            let mut server = super::backup_server::Server::new(
                 id,
                 serv_type,
                 controller_send,
@@ -329,6 +391,7 @@ fn build_and_run_server(
 
 pub fn initialize(
     path_to_file: &str,
+    the_one: bool,
 ) -> Result<
     (
         Vec<JoinHandle<()>>,
@@ -362,7 +425,7 @@ pub fn initialize(
     let senders = packet_channels
         .clone()
         .into_iter()
-        .map(|(id, (s, r))| (id, s))
+        .map(|(id, (s, _r))| (id, s))
         .collect::<HashMap<u8, Sender<Packet>>>();
 
     let mut handles = Vec::new();
@@ -370,6 +433,11 @@ pub fn initialize(
     let mut counters = [0; 10];
     let len = config.drone.len();
     println!("{}", len);
+    let mut val=0;
+    let mut range = rand::thread_rng();
+    if the_one {
+        val = range.r#gen::<usize>() % 10;
+    }
     for drone in config.clone().drone.into_iter() {
         // controller
         let (controller_drone_send, controller_drone_recv) = unbounded();
@@ -384,11 +452,12 @@ pub fn initialize(
             .map(|id| (id, packet_channels[&id].0.clone()))
             .collect();
         dd.insert(drone.id, drone.connected_node_ids.clone());
-        let val;
-        if len < 10 {
-            val = helper1(&mut counters);
-        } else {
-            val = helper2(&mut counters);
+        if !the_one {
+            if len <= 10 {
+                val = helper2(&mut counters);
+            } else {
+                val = helper1(&mut counters);
+            }
         }
         handles.push(thread::spawn(move || {
             build(
@@ -484,21 +553,158 @@ fn check_pdr(pdr: f32) -> bool {
     pdr >= 0.0 && pdr <= 1.00
 }
 
+fn check_client_server_connection(clients: &Vec<Client>, servers: &Vec<Server>)->bool {
+    let mut res = true;
+    for client in clients {
+        for server in servers {
+            if server.connected_drone_ids.contains(&client.id) {
+                res = false;
+            } 
+            if client.connected_drone_ids.contains(&server.id) {
+                res = false;
+            }
+        }
+    }
+    res
+}
+
+fn check_bidirectionality(config: &Config)->bool {
+    // Helper: build a map of id -> neighbors
+    let mut all_entities: HashMap<u8, &Vec<u8>> = HashMap::new();
+
+    for client in &config.client {
+        all_entities.insert(client.id, &client.connected_drone_ids);
+    }
+    for server in &config.server {
+        all_entities.insert(server.id, &server.connected_drone_ids);
+    }
+    for drone in &config.drone {
+        all_entities.insert(drone.id, &drone.connected_node_ids);
+    }
+    
+    // For each entity, check that each neighbor has this entity as a neighbor
+    for (id, neighbors) in &all_entities {
+        for neighbor_id in *neighbors {
+            if let Some(neighbor_neighbors) = all_entities.get(neighbor_id) {
+                if !neighbor_neighbors.contains(id) {
+                    println!("❌ ID {} has neighbor {}, but not reciprocated.", id, neighbor_id);
+                    return false;
+                }
+            } else {
+                println!("⚠️ ID {} refers to non-existent neighbor {}", id, neighbor_id);
+                return false;
+            }
+        }
+    }
+
+    println!("✅ All links are bidirectional.");
+    true
+}
+
+fn is_connected(drones: &Vec<wg_2024::config::Drone>, c_ids: Vec<u8>, s_ids: Vec<u8>) -> bool {
+    if drones.is_empty() {
+        return true; // empty graph is trivially connected
+    }
+    
+    // Build adjacency map: id -> neighbors
+    let mut adjacency: HashMap<u8, Vec<u8>> = HashMap::new();
+    for drone in drones {
+        let mut vec = Vec::new();
+        for id in drone.connected_node_ids.clone() {
+            if !c_ids.contains(&id) && !s_ids.contains(&id) {
+                vec.push(id);
+            }
+        }
+        adjacency.insert(drone.id, vec.clone());
+    }
+
+    // BFS or DFS to traverse the graph
+    let start_id = drones[0].id;
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back(start_id);
+
+    while let Some(current) = queue.pop_front() {
+        if visited.insert(current) {
+            if let Some(neighbors) = adjacency.get(&current) {
+                for neighbor in neighbors {
+                    queue.push_back(*neighbor);
+                }
+            }
+        }
+    }
+
+    // Check if we visited all drones
+    visited.len() == drones.len()
+}
+
+
+
 fn check_initializer(path_to_file: &str) -> bool {
     let config_data = std::fs::read_to_string(path_to_file).expect("Unable to read config file");
     // having our structs implement the Deserialize trait allows us to use the toml::from_str function to deserialize the config file into each of them
     let config: Config = toml::from_str(&config_data).expect("Unable to parse TOML");
+
+
     let mut current;
     let mut last = 0;
     let mut res = true;
-    for drone in config.drone {
-        current = drone.id;
-        if check_neighbors_id(current, &drone.connected_node_ids) {
-            if check_pdr(drone.pdr) {
-                if current != last {
-                    last = drone.id;
-                } else {
-                    res = false;
+     
+    if config.client.len()<1 || config.server.len()<1 || config.drone.len() < 2 {
+        res = false;
+    } else {
+        if check_bidirectionality(&config) {
+            let c_ids = config.clone().client.into_iter().map(|c| c.id).collect::<Vec<u8>>();
+            let s_ids = config.clone().server.into_iter().map(|s| s.id).collect::<Vec<u8>>();
+            if is_connected(&config.drone,c_ids,s_ids){
+                for drone in config.drone {
+                    current = drone.id;
+                    if check_neighbors_id(current, &drone.connected_node_ids) {
+                        if check_pdr(drone.pdr) {
+                            if current != last {
+                                last = drone.id;
+                            } else {
+                                res = false;
+                            }
+                        } else {
+                            res = false;
+                        }
+                    } else {
+                        res = false;
+                    }
+                }
+                if res {
+                    for client in config.client {
+                        current = client.id;
+                        if client.connected_drone_ids.len()<1 || client.connected_drone_ids.len()>2 {
+                            res = false;
+                        } else if check_neighbors_id(current, &client.connected_drone_ids) {
+                            if current != last {
+                                last = client.id;
+                            } else {
+                                res = false;
+                            }
+                        } else {
+                            res = false;
+                        }
+                    }
+                
+                }
+                if res {
+                    for server in config.server {
+                        current = server.id;
+                        if server.connected_drone_ids.len()<2 {
+                            res = false;
+                        } else if check_neighbors_id(current, &server.connected_drone_ids) {
+                            if current != last {
+                                last = server.id;
+                            } else {
+                                res = false;
+                            }
+                        } else {
+                            res = false;
+                        }
+                    }
                 }
             } else {
                 res = false;
@@ -506,35 +712,7 @@ fn check_initializer(path_to_file: &str) -> bool {
         } else {
             res = false;
         }
-    }
-    if res {
-        for client in config.client {
-            current = client.id;
-            if check_neighbors_id(current, &client.connected_drone_ids) {
-                if current != last {
-                    last = client.id;
-                } else {
-                    res = false;
-                }
-            } else {
-                res = false;
-            }
-        }
-        if res {
-            for server in config.server {
-                current = server.id;
-                if check_neighbors_id(current, &server.connected_drone_ids) {
-                    if current != last {
-                        last = server.id;
-                    } else {
-                        res = false;
-                    }
-                } else {
-                    res = false;
-                }
-            }
-        }
-    }
+    }       
     res
 }
 
@@ -567,9 +745,8 @@ mod test {
 
     #[test]
     fn test_init_diff() {
-        while let Some(h) = initialize("./configs/config.toml").unwrap().0.pop() {
+        while let Some(h) = initialize("./configs/config.toml",false).unwrap().0.pop() {
             assert_eq!(1, 2);
-            h.join();
         }
     }
 

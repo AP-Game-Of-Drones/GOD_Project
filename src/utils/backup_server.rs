@@ -22,7 +22,6 @@ pub const TEXTSERVER: u8 = 1;
 pub const MEDIASERVER: u8 = 2;
 pub const CHATSERVER: u8 = 3;
 
-include!(concat!(env!("OUT_DIR"), "/build_constants.rs"));
 
 const ALLTEXT: &str = "assets/web/text/all_text_links.txt";
 const ALLMEDIA: &str = "assets/web/text/all_media_links.txt";
@@ -165,15 +164,18 @@ impl Server {
                                 .unwrap(),
                         );
                         info!("{:?}", all_text.clone());
-                        self.send_from_server(
-                            src_id,
-                            Message::DefaultResponse(DefaultResponse::new_all_text_rsp(all_text)),
-                        );
+                        if !all_text.is_empty() {
+                            self.send_from_server(
+                                src_id,
+                                Message::DefaultResponse(DefaultResponse::new_all_text_rsp(all_text)),
+                            );
+                        } else {
+                            self.send_from_server(
+                                src_id,
+                                Message::DefaultResponse(DefaultResponse::new_err_no_text_rsp()),
+                            );
+                        }
                     } else {
-                        self.send_from_server(
-                            src_id,
-                            Message::DefaultResponse(DefaultResponse::new_err_no_text_rsp()),
-                        );
                     }
                 }
                 DefaultsRequest::GETALLMEDIALINKS => {
@@ -195,12 +197,19 @@ impl Server {
                     );
                     info!("{:?}", all_text.clone());
                     if self.is_media_server() {
-                        self.send_from_server(
-                            src_id,
-                            Message::DefaultResponse(DefaultResponse::new_all_media_rsp(
-                                all_text.clone(),
-                            )),
-                        );
+                        if all_text.is_empty() {
+                            self.send_from_server(
+                                src_id,
+                                Message::DefaultResponse(DefaultResponse::new_err_no_media_rsp()),
+                            );  
+                        } else {
+                            self.send_from_server(
+                                src_id,
+                                Message::DefaultResponse(DefaultResponse::new_all_media_rsp(
+                                    all_text.clone(),
+                                )),
+                            );
+                        }
                     } else {
                         self.send_from_server(
                             src_id,
@@ -299,10 +308,17 @@ impl Server {
                                 .to_str()
                                 .unwrap(),
                         );
-                        self.send_from_server(
+                        if !text.is_empty() {
+                            self.send_from_server(
+                                src_id,
+                                Message::ContentResponse(ContentResponse::TEXT(text)),
+                            );
+                        } else {
+                            self.send_from_server(
                             src_id,
-                            Message::ContentResponse(ContentResponse::TEXT(text)),
+                            Message::ContentResponse(ContentResponse::NOTEXTFOUND),
                         );
+                        }
                     } else {
                         self.send_from_server(
                             src_id,

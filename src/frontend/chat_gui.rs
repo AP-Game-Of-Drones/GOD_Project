@@ -20,7 +20,6 @@ use crate::{
 };
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 
-include!(concat!(env!("OUT_DIR"), "/build_constants.rs"));
 const CHAT_PATH: &str = "assets/chat/media/";
 
 pub struct ChatGuiPlugin {

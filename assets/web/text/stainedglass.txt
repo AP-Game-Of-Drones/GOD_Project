@@ -1,0 +1,7 @@
+assets/web/media/image/stainedglass_1.png
+assets/web/media/image/stainedglass_2.png
+assets/web/media/image/stainedglass_3.png
+assets/web/media/image/stainedglass_4.png
+assets/web/media/image/stainedglass_5.png
+assets/web/media/image/stainedglass_6.png
+assets/web/media/image/stainedglass_7.png

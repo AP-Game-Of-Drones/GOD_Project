@@ -5,22 +5,13 @@ use std::{
 };
 
 use bevy::{
-    DefaultPlugins,
-    app::{AppExit, InternedAppLabel, Startup, SubApp, SubApps, Update},
-    asset::AssetPlugin,
-    audio::AudioSource,
-    ecs::{
+    app::{AppExit, InternedAppLabel, Startup, SubApp, SubApps, Update}, asset::AssetPlugin, audio::AudioSource, ecs::{
         component::Component,
-        event::EventWriter,
+        event::{EventReader, EventWriter},
         resource::Resource,
         system::{Commands, Res, ResMut},
         world::World,
-    },
-    prelude::{PluginGroup, default},
-    state::app::AppExtStates,
-    ui::widget::Label,
-    window::{Window, WindowMode, WindowPlugin, WindowResolution},
-    winit::{WakeUp, WinitPlugin},
+    }, input::keyboard::{Key, KeyCode, KeyboardInput}, prelude::{default, PluginGroup}, state::app::AppExtStates, ui::widget::Label, window::{Window, WindowMode, WindowPlugin, WindowResolution}, winit::{WakeUp, WinitPlugin}, DefaultPlugins
 };
 use bevy_egui::{
     EguiContexts, EguiPlugin,
@@ -28,6 +19,7 @@ use bevy_egui::{
 };
 use bevy_simple_text_input::TextInputPlugin;
 use image::DynamicImage;
+use rodio::InputDevices;
 use wg_2024::config::Config;
 
 use crate::{
@@ -80,6 +72,10 @@ pub enum WebEvent {
     Audio(AudioSource),
     Image(DynamicImage),
     Text(Vec<String>),
+    ErrNoAllMedia,
+    ErrNoAllText,
+    ErrMediaNotFound,
+    ErrTextNotFound
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Resource)]
@@ -99,28 +95,11 @@ enum AppType {
 #[derive(Resource)]
 pub struct Configs(pub Config);
 
-#[derive(Resource, Clone)]
-pub struct StartConfig(Option<String>);
-
-pub fn run_prim_with_seconds() {
-    let config_path = std::env::current_exe()
-        .expect("Failed to get exe_dir")
-        .parent()
-        .unwrap()
-        .to_path_buf()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-        .join("configs/config.toml")
-        .to_str()
-        .unwrap()
-        .to_string();
+pub fn run_app() {
+    let (config_path, the_one) = utils::initializer::choose_config_cli();
 
     let (_handles, chat, web, simulation_controller, configs) =
-        utils::initializer::initialize(config_path.as_str()).unwrap();
+        utils::initializer::initialize(config_path.to_str().unwrap(),the_one).unwrap();
 
     let mut app = bevy::app::App::new();
     let mut winit_plugin = WinitPlugin::<WakeUp>::default();
@@ -182,31 +161,28 @@ pub fn run_prim_with_seconds() {
 }
 
 fn setup(mut c: Commands) {
-    c.insert_resource(StartConfig(None));
 }
 
 fn upds(
-    mut ctx: EguiContexts,
     mut state: ResMut<MainState>,
     apptype: Res<AppType>,
-    config: Res<StartConfig>,
+    mut keys:  EventReader<KeyboardInput>
 ) {
-    let ctx = ctx.ctx_mut();
-    bevy_egui::egui::TopBottomPanel::top("Switch").show(ctx, |ui| {
-        if ui.button("Sim").clicked() {
+    for event in keys.read() {
+        if event.key_code == KeyCode::ArrowLeft && *state != MainState::Sim {
             *state = MainState::Sim;
         }
         if let AppType::Chat = *apptype {
-            if ui.button("Chat").clicked() {
+            if event.key_code == KeyCode::ArrowRight && *state != MainState::Chat {
                 *state = MainState::Chat;
             }
         }
         if let AppType::Web = *apptype {
-            if ui.button("Web").clicked() {
+            if event.key_code == KeyCode::ArrowRight && *state != MainState::Web {
                 *state = MainState::Web;
             }
         }
-    });
+    }
 }
 
 // TODO : Made to choose config at runtime, problem: refractor on setup of gui and initialize fn

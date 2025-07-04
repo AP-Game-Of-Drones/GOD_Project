@@ -126,6 +126,7 @@ pub struct WebViewState {
 pub struct AppState {
     pub selected_source_client: Option<u8>,
     pub browsers_states: HashMap<u8, WebViewState>,
+    pub error_state: bool
 }
 
 #[derive(Debug, Clone, Default)]
@@ -182,10 +183,12 @@ pub fn ui_system(
     if let MainState::Web = *state {
         egui::TopBottomPanel::bottom("no_match").show(ctx, |ui| {
             if ui.button("Error in Requests").clicked(){
+                app_state.error_state = true;
+            }
+            if app_state.error_state{
                 egui::Window::new("ErrorMessages")
-                .auto_sized()
                 .collapsible(true)
-                .auto_sized()
+                .max_size((300.,215.))
                 .show(&ctx,|ui|{
                     egui::ScrollArea::vertical().show(ui, |ui|{
                         if let Some(client_id) = app_state.selected_source_client {
@@ -209,6 +212,9 @@ pub fn ui_system(
                             }
                         }
                     });
+                    if ui.button("X").clicked() {
+                        app_state.error_state = false;
+                    }
                 });
             }
         });
@@ -309,21 +315,26 @@ pub fn ui_system(
                                     for msg in web_state.web_pages.content.clone() {
                                         match msg {
                                             ContentResponse::TEXT(links) => {
-                                                // if let Some(server) = servers
-                                                //     .servers
-                                                //     .iter()
-                                                //     .find(|s| s.server_type == TEXTSERVER)
-                                                // {
-                                                //     let _ = channels
-                                                //         .channels
-                                                //         .get(&client_id)
-                                                //         .unwrap()
-                                                //         .sender
-                                                //         .send(WebCommand::GetText(
-                                                //             server.id,
-                                                //             label.clone(),
-                                                //         ));
-                                                // }
+                                                for label in links {
+                                                    if let Some(server) = servers
+                                                        .servers
+                                                        .iter()
+                                                        .find(|s| s.server_type == TEXTSERVER)
+                                                    {   
+                                                        ui.label(label.clone());
+                                                        if ui.button("->").clicked(){
+                                                            let _ = channels
+                                                                .channels
+                                                                .get(&client_id)
+                                                                .unwrap()
+                                                                .sender
+                                                                .send(WebCommand::GetText(
+                                                                    server.id,
+                                                                    label.clone(),
+                                                            ));
+                                                        }
+                                                    }
+                                                }
                                             }
                                             _ => {}
                                         }
@@ -499,10 +510,20 @@ pub fn ui_system(
                             .default
                             .push(DefaultResponse::ALLTEXT(res.clone()));
                     }
+                    WebEvent::ErrNoAllMedia=>{
+                        view.web_pages
+                            .default
+                            .push(DefaultResponse::ERRNOMEDIA);
+                    }
                     WebEvent::Audio(res) => {
                         view.web_pages
                             .content
                             .push(ContentResponse::MEDIAUDIO(res.clone()));
+                    }
+                    WebEvent::ErrNoAllText=>{
+                        view.web_pages
+                            .default
+                            .push(DefaultResponse::ERRNOTEXT);
                     }
                     WebEvent::Image(res) => {
                         view.web_pages
@@ -513,6 +534,16 @@ pub fn ui_system(
                         view.web_pages
                             .content
                             .push(ContentResponse::TEXT(res.clone()));
+                    }
+                    WebEvent::ErrMediaNotFound => {
+                        view.web_pages
+                            .content
+                            .push(ContentResponse::NOMEDIAFOUND);
+                    }
+                    WebEvent::ErrTextNotFound => {
+                        view.web_pages
+                            .content
+                            .push(ContentResponse::NOTEXTFOUND);
                     }
                 }
             }

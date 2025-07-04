@@ -198,11 +198,18 @@ impl WebBrowser {
                         let _ = self.gui_event_sender.send(WebEvent::AllMedia(res.clone()));
                         Ok(ProcessWebResult::ALLMEDIA)
                     } else {
+                        let _ = self.gui_event_sender.send(WebEvent::ErrNoAllMedia);
                         Err(ProcessWebResult::NOMEDIAS)
                     }
                 }
-                DefaultResponse::ERRNOMEDIA => Err(ProcessWebResult::NOMEDIAS),
-                DefaultResponse::ERRNOTEXT => Err(ProcessWebResult::NOTEXTS),
+                DefaultResponse::ERRNOMEDIA => {
+                    let _ = self.gui_event_sender.send(WebEvent::ErrNoAllMedia);
+                    Err(ProcessWebResult::NOMEDIAS)
+                },
+                DefaultResponse::ERRNOTEXT => {
+                    let _ = self.gui_event_sender.send(WebEvent::ErrNoAllText);
+                    Err(ProcessWebResult::NOTEXTS)
+                },
                 _ => Err(ProcessWebResult::ERR),
             },
             Message::ContentResponse(cr) => match cr.clone() {
@@ -221,8 +228,14 @@ impl WebBrowser {
                     let _ = self.gui_event_sender.send(WebEvent::Text(res.clone()));
                     Ok(ProcessWebResult::TEXT)
                 }
-                ContentResponse::NOMEDIAFOUND => Err(ProcessWebResult::NOMEDIA),
-                ContentResponse::NOTEXTFOUND => Err(ProcessWebResult::NOTEXT),
+                ContentResponse::NOMEDIAFOUND => {
+                    let _ = self.gui_event_sender.send(WebEvent::ErrMediaNotFound);
+                    Err(ProcessWebResult::NOMEDIA)
+                },
+                ContentResponse::NOTEXTFOUND => {
+                    let _ = self.gui_event_sender.send(WebEvent::ErrTextNotFound);
+                    Err(ProcessWebResult::NOTEXT)
+                },
             },
             _ => Err(ProcessWebResult::ERR),
         }
