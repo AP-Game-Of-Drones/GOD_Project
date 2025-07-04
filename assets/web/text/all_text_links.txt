@@ -2,3 +2,4 @@ assets/web/text/all_media_links.txt
 assets/web/text/game_arts.txt
 assets/web/text/stainedglass.txt
 assets/web/text/error_text.txt
+assets/web/text/just_audio.txt

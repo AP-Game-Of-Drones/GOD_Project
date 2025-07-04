@@ -267,7 +267,7 @@ pub fn ui_system(
                                                                     ));
                                                             }
                                                         }
-                                                        if label.contains("all_text") {
+                                                        if label.contains("text") {
                                                             if let Some(server) = servers
                                                                 .servers
                                                                 .iter()
@@ -316,14 +316,15 @@ pub fn ui_system(
                                         match msg {
                                             ContentResponse::TEXT(links) => {
                                                 for label in links {
-                                                    if let Some(server) = servers
-                                                        .servers
-                                                        .iter()
-                                                        .find(|s| s.server_type == TEXTSERVER)
-                                                    {   
-                                                        ui.label(label.clone());
-                                                        if ui.button("->").clicked(){
-                                                            let _ = channels
+                                                    ui.label(label.clone());
+                                                    if ui.button("->").clicked(){
+                                                        if label.contains("text/"){
+                                                            if let Some(server) = servers
+                                                            .servers
+                                                            .iter()
+                                                            .find(|s| s.server_type == TEXTSERVER)
+                                                            {   
+                                                                let _ = channels
                                                                 .channels
                                                                 .get(&client_id)
                                                                 .unwrap()
@@ -331,7 +332,9 @@ pub fn ui_system(
                                                                 .send(WebCommand::GetText(
                                                                     server.id,
                                                                     label.clone(),
-                                                            ));
+                                                                ));
+                                                                info!("SentGetText");
+                                                            }
                                                         }
                                                     }
                                                 }

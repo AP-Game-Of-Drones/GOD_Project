@@ -1,0 +1,5 @@
+assets/web/media/audio/track_1.mp3
+assets/web/media/audio/track_2.mp3
+assets/web/media/audio/track_3.mp3
+assets/web/media/audio/track_4.mp3
+assets/web/media/audio/track_5.mp3
