@@ -185,7 +185,7 @@ struct Contacts {
 struct ClientViewState {
     selected_server: Option<u8>,
     selected_client: Option<u8>,
-    chat_pages: HashMap<u8, ChatPage>,
+    chat_pages: HashMap<(u8,u8), ChatPage>,
     input: HashMap<u8, String>,
     attachments_state: bool,
 }
@@ -330,67 +330,75 @@ fn ui_system(
             egui::ScrollArea::vertical().show(ui, |ui| {
                 if let Some(client_id) = app_state.selected_source_client {
                     if let Some(state) = app_state.client_states.get_mut(&client_id) {
-                        if let Some(contact) = state.selected_client {
-                            if let Some(chat_page) = state.chat_pages.get_mut(&contact) {
-                                ui.heading(format!("Chat with {}", contact));
-                                for (i, pos, msg) in &chat_page.messages {
-                                    let mut position = None;
-                                    if *pos == SENT {
-                                        position =
-                                            Some(egui::Layout::right_to_left(egui::Align::Min));
-                                    }
-                                    if *pos == RECV {
-                                        position =
-                                            Some(egui::Layout::left_to_right(egui::Align::Min))
-                                    }
-
-                                    ui.with_layout(position.unwrap(), |ui| match msg {
-                                        ChatMessages::CHATSTRING(_, _, _, s) => {
-                                            ui.label(s);
-                                        }
-                                        ChatMessages::CHATIMAGE(_, _, _, img) => {
-                                            let id = img_hash(img);
-                                            let texture =
-                                                handle_incoming_image(img, ctx, &mut cache, id);
-                                            let size = egui::Vec2::new(
-                                                img.width() as f32 / 2.0,
-                                                img.height() as f32 / 2.0,
-                                            );
-                                            ui.add(
-                                                egui::Image::new(&texture).fit_to_exact_size(size),
-                                            );
-                                        }
-                                        ChatMessages::CHATAUDIO(_, _, _, track) => {
-                                            ui.horizontal(|ui| {
-                                                ui.label("🔊 Audio message");
-                                                if ui.button("▶ Play").clicked() {
-                                                    if let Some(track_bytes) = Some(&track.bytes) {
-                                                        let cursor =
-                                                            Cursor::new(track_bytes.clone());
-
-                                                        if let Ok(source) = Decoder::new(cursor) {
-                                                            let sink = Sink::try_new(
-                                                                &rodio_player.0.handle,
-                                                            )
-                                                            .unwrap();
-                                                            sink.append(source);
-                                                            rodio_player.0.sinks.insert(*i, sink);
-                                                        } else {
-                                                            error!("Failed to decode audio");
-                                                        }
-                                                    }
+                        if let Some(server_id) = state.selected_server {
+                            if let Some(contact) = state.selected_client {
+                                if let Some(server) = servers.servers.iter().find(|s| {
+                                s.id == server_id
+                                    && s.selected
+                                    && *s.registered.get(&client_id).unwrap_or(&false)
+                                }){
+                                    if let Some(chat_page) = state.chat_pages.get_mut(&(contact,server_id)) {
+                                        ui.heading(format!("Chat with {}", contact));
+                                        for (i, pos, msg) in &chat_page.messages {
+                                            let mut position = None;
+                                            if *pos == SENT {
+                                                position =
+                                                    Some(egui::Layout::right_to_left(egui::Align::Min));
+                                            }
+                                            if *pos == RECV {
+                                                position =
+                                                    Some(egui::Layout::left_to_right(egui::Align::Min))
+                                            }
+                                        
+                                            ui.with_layout(position.unwrap(), |ui| match msg {
+                                                ChatMessages::CHATSTRING(_, _, _, s) => {
+                                                    ui.label(s);
                                                 }
-
-                                                if ui.button("⏹ Stop").clicked() {
-                                                    if let Some(sink) =
-                                                        rodio_player.0.sinks.remove(i)
-                                                    {
-                                                        sink.stop();
-                                                    }
+                                                ChatMessages::CHATIMAGE(_, _, _, img) => {
+                                                    let id = img_hash(img);
+                                                    let texture =
+                                                        handle_incoming_image(img, ctx, &mut cache, id);
+                                                    let size = egui::Vec2::new(
+                                                        img.width() as f32 / 2.0,
+                                                        img.height() as f32 / 2.0,
+                                                    );
+                                                    ui.add(
+                                                        egui::Image::new(&texture).fit_to_exact_size(size),
+                                                    );
+                                                }
+                                                ChatMessages::CHATAUDIO(_, _, _, track) => {
+                                                    ui.horizontal(|ui| {
+                                                        ui.label("🔊 Audio message");
+                                                        if ui.button("▶ Play").clicked() {
+                                                            if let Some(track_bytes) = Some(&track.bytes) {
+                                                                let cursor =
+                                                                    Cursor::new(track_bytes.clone());
+                                                            
+                                                                if let Ok(source) = Decoder::new(cursor) {
+                                                                    let sink = Sink::try_new(
+                                                                        &rodio_player.0.handle,
+                                                                    )
+                                                                    .unwrap();
+                                                                    sink.append(source);
+                                                                    rodio_player.0.sinks.insert(*i, sink);
+                                                                } else {
+                                                                    error!("Failed to decode audio");
+                                                                }
+                                                            }
+                                                        }
+                                                    
+                                                        if ui.button("⏹ Stop").clicked() {
+                                                            if let Some(sink) =
+                                                                rodio_player.0.sinks.remove(i)
+                                                            {
+                                                                sink.stop();
+                                                            }
+                                                        }
+                                                    });
                                                 }
                                             });
                                         }
-                                    });
+                                    }
                                 }
                             }
                         }
@@ -481,7 +489,7 @@ fn ui_system(
                                                                     state.attachments_state = false;
                                                                     let entry = state
                                                                         .chat_pages
-                                                                        .entry(contact)
+                                                                        .entry((contact,server_id))
                                                                         .or_insert_with(|| ChatPage {
                                                                             contact_id: contact,
                                                                             messages: Vec::new(),
@@ -550,7 +558,7 @@ fn ui_system(
                                                                     state.attachments_state = false;
                                                                     let entry = state
                                                                         .chat_pages
-                                                                        .entry(contact)
+                                                                        .entry((contact,server_id))
                                                                         .or_insert_with(|| ChatPage {
                                                                             contact_id: contact,
                                                                             messages: Vec::new(),
@@ -584,7 +592,7 @@ fn ui_system(
                                                 ),
                                             );
                                         let entry =
-                                            state.chat_pages.entry(contact).or_insert_with(|| {
+                                            state.chat_pages.entry((contact,server_id)).or_insert_with(|| {
                                                 ChatPage {
                                                     contact_id: contact,
                                                     messages: Vec::new(),
@@ -638,16 +646,16 @@ fn ui_system(
                         int = int + ((c as u64 - '0' as u64) * (10_u64.pow(i as u32)) as u64);
                     }
                     match msg {
-                        ChatMessages::CHATSTRING(src, _, target, _)
-                        | ChatMessages::CHATIMAGE(src, _, target, _)
-                        | ChatMessages::CHATAUDIO(src, _, target, _) => {
+                        ChatMessages::CHATSTRING(src, srv, target, _)
+                        | ChatMessages::CHATIMAGE(src, srv, target, _)
+                        | ChatMessages::CHATAUDIO(src, srv, target, _) => {
                             if cli == target {
                                 let entry = app_state
                                     .client_states
                                     .get_mut(&cli)
                                     .unwrap()
                                     .chat_pages
-                                    .entry(src)
+                                    .entry((src,srv))
                                     .or_insert_with(|| ChatPage {
                                         contact_id: target,
                                         messages: Vec::new(),
