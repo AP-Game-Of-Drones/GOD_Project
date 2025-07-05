@@ -12,7 +12,7 @@ pdr = 0.00
 id = 21
 connected_drone_ids = [1,2]
 
-[[client]]
+[[server]]
 id = 22
 connected_drone_ids = [1,2]
 

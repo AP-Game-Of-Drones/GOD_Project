@@ -107,6 +107,7 @@ struct ServerPanel {
 struct ServerInfo {
     id: u8,
     server_type: u8,
+    selected: bool
 }
 
 impl Default for ServerInfo {
@@ -114,6 +115,7 @@ impl Default for ServerInfo {
         Self {
             id: 0,
             server_type: 0,
+            selected: false,
         }
     }
 }
@@ -225,15 +227,16 @@ fn ui_system(
                                                             if let Some(server) = servers
                                                                 .servers
                                                                 .iter()
-                                                                .find(|s| s.server_type == MEDIASERVER)
+                                                                .find(|s| s.server_type == TEXTSERVER && s.selected)
                                                             {
                                                                 let _ = channels
                                                                     .channels
                                                                     .get(&client_id)
                                                                     .unwrap()
                                                                     .sender
-                                                                    .send(WebCommand::GetAllMedia(
+                                                                    .send(WebCommand::GetText(
                                                                         server.id,
+                                                                        label.clone()
                                                                     ));
                                                             }
                                                         }
@@ -241,7 +244,7 @@ fn ui_system(
                                                             if let Some(server) = servers
                                                                 .servers
                                                                 .iter()
-                                                                .find(|s| s.server_type == TEXTSERVER)
+                                                                .find(|s| s.server_type == TEXTSERVER && s.selected)
                                                             {
                                                                 let _ = channels
                                                                     .channels
@@ -260,12 +263,12 @@ fn ui_system(
                                             DefaultResponse::ALLMEDIALINKS(vec) => {
                                                 for label in vec {
                                                     ui.label(label.clone());
-                                                    if let Some(server) = servers
-                                                        .servers
-                                                        .iter()
-                                                        .find(|s| s.server_type == MEDIASERVER)
-                                                    {
-                                                        if ui.button("->").clicked() {
+                                                    if ui.button("->").clicked() {
+                                                        if let Some(server) = servers
+                                                            .servers
+                                                            .iter()
+                                                            .find(|s| s.server_type == MEDIASERVER && s.selected)
+                                                        {
                                                             let _ = channels
                                                                 .channels
                                                                 .get(&client_id)
@@ -292,7 +295,7 @@ fn ui_system(
                                                             if let Some(server) = servers
                                                             .servers
                                                             .iter()
-                                                            .find(|s| s.server_type == TEXTSERVER)
+                                                            .find(|s| s.server_type == TEXTSERVER && s.selected)
                                                             {   
                                                                 let _ = channels
                                                                 .channels
@@ -310,7 +313,7 @@ fn ui_system(
                                                             if let Some(server) = servers
                                                             .servers
                                                             .iter()
-                                                            .find(|s| s.server_type == MEDIASERVER)
+                                                            .find(|s| s.server_type == MEDIASERVER && s.selected)
                                                             {   
                                                                 let _ = channels
                                                                 .channels
@@ -452,9 +455,9 @@ fn ui_system(
     
         egui::SidePanel::right("Text and Media").show(ctx, |ui| {
             if let Some(client_id) = app_state.selected_source_client {
-                if ui.button("GET MEDIA LINKS").clicked() {
-                    for s in servers.servers.clone() {
-                        if s.server_type == MEDIASERVER {
+                for s in servers.servers.clone() {
+                    if s.server_type == MEDIASERVER {
+                        if ui.button(format!("GET MEDIA LINKS\n{}",s.id)).clicked() {
                             let _ = channels
                                 .channels
                                 .get(&client_id)
@@ -463,11 +466,11 @@ fn ui_system(
                                 .send(WebCommand::GetAllMedia(s.id));
                         }
                     }
+                    ui.separator();
                 }
-                ui.separator();
-                if ui.button("GET TEXTS LINKS").clicked() {
-                    for s in servers.servers.clone() {
-                        if s.server_type == TEXTSERVER {
+                for s in servers.servers.clone() {
+                    if s.server_type == TEXTSERVER {
+                        if ui.button(format!("GET TEXTS LINKS\n{}",s.id)).clicked() {
                             let _ = channels
                                 .channels
                                 .get(&client_id)
@@ -475,6 +478,32 @@ fn ui_system(
                                 .sender
                                 .send(WebCommand::GetAllText(s.id));
                         }
+                    }
+                    ui.separator();
+                }
+                ui.separator();
+                ui.separator();
+
+                let mut selected_server_id = None;
+
+                for s in &servers.servers {
+                    if s.server_type == TEXTSERVER {
+                        if ui.button(format!("TEXTSERVER {}", s.id)).clicked() {
+                            selected_server_id = Some(s.id);
+                        }
+                    }
+                    if s.server_type == MEDIASERVER {
+                        if ui.button(format!("MEDIASERVER {}", s.id)).clicked() {
+                            selected_server_id = Some(s.id);
+                        }
+                    }
+                    ui.separator();
+                }
+
+                // After loop: set selected = true only for the one clicked, false for others
+                if let Some(id) = selected_server_id {
+                    for s in &mut servers.servers {
+                        s.selected = s.id == id;
                     }
                 }
             }
@@ -486,7 +515,7 @@ fn ui_system(
                 match event {
                     WebEvent::Servers(server_type, id) => {
                         if !servers.servers.iter().any(|s| s.id == id) {
-                            servers.servers.push(ServerInfo { id, server_type });
+                            servers.servers.push(ServerInfo { id, server_type, selected: false });
                         }
                     }
                     WebEvent::AllMedia(res) => {
