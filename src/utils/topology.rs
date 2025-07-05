@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use bevy::log::info;
 use wg_2024::{network::NodeId, packet::NodeType};
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -86,20 +87,31 @@ impl Topology {
         let mut current_path = Vec::new();
         let mut all_paths = Vec::new();
 
-        self.paths = Some(Vec::new()); // Reset paths
         self.dfs(src, dst, &mut visited, &mut current_path, &mut all_paths);
 
         if all_paths.is_empty() {
             println!("⚠️ Warning: No paths found from {:?} to {:?}", src, dst);
         }
         all_paths.reverse();
-
-        self.paths = Some(
-            all_paths
+        if self.paths.is_none(){
+            self.paths = Some(
+                all_paths
                 .into_iter()
                 .map(|path| (path.clone(), path.len() as u64))
                 .collect(),
-        );
+            );
+        } else {
+            if let Some(paths) = &mut self.paths {
+                for new_path in all_paths {
+                    let already_exists = paths.iter().any(|(existing_path, _)| *existing_path == new_path);
+                    if already_exists {
+                        // info!("Path already discovered");
+                    } else {
+                        paths.push((new_path.clone(), new_path.len() as u64));
+                    }
+                }
+            }
+        }
     }
 
     fn dfs(
@@ -147,7 +159,7 @@ impl Topology {
 
             self.current_path = best_path.clone();
 
-            println!("Best path selected: {:?}", best_path);
+            // println!("Best path selected: {:?}", best_path);
         } else {
             println!("⚠️ No paths available to select for dst: {:?}", dst);
         }
@@ -158,6 +170,7 @@ impl Topology {
     }
 
     pub fn increment_weights_for_node(&mut self, node_id: NodeId) {
+        info!("\n\nNODE ID THAT GENERATED NACK: {}\n\n",node_id);
         if let Some((current_path, weight)) = &mut self.current_path {
             if current_path.contains(&node_id) {
                 *weight += 1;
@@ -173,7 +186,7 @@ impl Topology {
         }
     }
 
-    pub fn add_node(&mut self, node: Node) {
+    fn add_node(&mut self, node: Node) {
         self.nodes.insert(node.value, node);
     }
 
@@ -191,13 +204,13 @@ impl Topology {
         }
     }
 
-    pub fn get_neighbors(&self, node_id: NodeId) -> Option<Vec<NodeId>> {
+    fn get_neighbors(&self, node_id: NodeId) -> Option<Vec<NodeId>> {
         self.nodes
             .get(&node_id)
             .map(|node| node.adjacents.iter().map(|(id, _)| *id).collect())
     }
 
-    pub fn find_one_path(&self, src: NodeId, dst: NodeId) -> Option<Vec<NodeId>> {
+    fn find_one_path(&self, src: NodeId, dst: NodeId) -> Option<Vec<NodeId>> {
         let mut visited = HashSet::new();
         let mut path = Vec::new();
 

@@ -1,40 +1,23 @@
-use std::{
-    io::Write,
-    ops::DerefMut,
-    sync::{Arc, Mutex},
-};
-
 use bevy::{
-    app::{AppExit, InternedAppLabel, Startup, SubApp, SubApps, Update}, asset::AssetPlugin, audio::AudioSource, ecs::{
-        component::Component,
-        event::{EventReader, EventWriter},
+    app::{Startup,Update}, asset::AssetPlugin, audio::AudioSource, ecs::{
+        event::{EventReader},
         resource::Resource,
         system::{Commands, Res, ResMut},
-        world::World,
-    }, input::keyboard::{Key, KeyCode, KeyboardInput}, prelude::{default, PluginGroup}, state::app::AppExtStates, ui::widget::Label, window::{Window, WindowMode, WindowPlugin, WindowResolution}, winit::{WakeUp, WinitPlugin}, DefaultPlugins
+    }, input::keyboard::{ KeyCode, KeyboardInput}, prelude::{default, PluginGroup},window::{Window, WindowMode, WindowPlugin, WindowResolution}, winit::{WakeUp, WinitPlugin}, DefaultPlugins
 };
-use bevy_egui::{
-    EguiContexts, EguiPlugin,
-    egui::{FontId, RichText},
-};
+
 use bevy_simple_text_input::TextInputPlugin;
 use image::DynamicImage;
-use rodio::InputDevices;
 use wg_2024::config::Config;
 
 use crate::{
     frontend::{
-        self,
         chat_gui::{ChatGuiPlugin, GuiControllers},
         web_gui::WebGuiPlugin,
     },
-    utils::{self, controller},
+    utils::{self},
 };
 
-use bevy::app::AppLabel;
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, AppLabel)]
-struct GuiApp;
 
 pub mod chat_gui;
 pub mod web_gui;
@@ -160,7 +143,7 @@ pub fn run_app() {
     app.run();
 }
 
-fn setup(mut c: Commands) {
+fn setup(_c: Commands) {
 }
 
 fn upds(
@@ -184,41 +167,3 @@ fn upds(
         }
     }
 }
-
-// TODO : Made to choose config at runtime, problem: refractor on setup of gui and initialize fn
-// fn ui_select_value(
-//     mut shared: ResMut<StartConfig>,
-//     mut ectx: EguiContexts,
-// ) {
-//     let ctx = ectx.ctx_mut();
-//     bevy_egui::egui::CentralPanel::default().show(ctx, |ui|{
-//         let config_path = std::env::current_exe()
-//         .unwrap()
-//         .parent()
-//         .unwrap()
-//         .to_path_buf()
-//         .parent()
-//         .unwrap()
-//         .to_path_buf()
-//         .parent()
-//         .unwrap()
-//         .to_path_buf()
-//         .join("configs/");
-
-//         let reader = std::fs::read_dir(config_path).expect("No config dir found");
-//         ui.vertical(|ui|{
-//             for entry in reader {
-//                 if let Ok(file) = entry{
-//                     let config = file.path().to_str().unwrap().to_string();
-//                     ui.label(RichText::new(config.clone()).font(FontId::proportional(10.)).color(bevy_egui::egui::Color32::RED));
-//                     if ui.button("->").clicked() {
-//                         *shared = StartConfig(Some(config.clone()));
-//                     };
-//                 }
-//                 ui.separator();
-//             }
-
-//         })
-
-//     });
-// }

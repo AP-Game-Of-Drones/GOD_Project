@@ -33,24 +33,22 @@ impl super::Client for ChatClient {}
 
 #[derive(Clone)]
 pub struct ChatClient {
-    pub id: NodeId,                                   // Unique identifier for the client
-    pub controller_send: Sender<NodeEvent>, // Sender for communication with the controller
-    pub controller_recv: Receiver<NodeCommand>, // Receiver for commands from the controller
-    pub packet_recv: Receiver<Packet>,      // Receiver for incoming packets
-    pub packet_send: HashMap<NodeId, Sender<Packet>>, // Map of packet senders for neighbors
-    pub flood_ids: HashSet<(u64, NodeId)>,  // Set to track flood IDs for deduplication
-    pub client_topology: super::super::topology::Topology, // topology built by flooding
-    pub holder_sent: HashMap<(u64, NodeId), Vec<Packet>>, //fragment holder of sent messages, use session_id,src_id tuple as key
-    pub holder_frag_index: HashMap<(u64, NodeId), Vec<u64>>, //fragment indices holder for received packets, use session_id,src_id tuple as key
-    pub holder_rec: HashMap<(u64, NodeId), Vec<u8>>, //data holder of received messages, use session_id,src_id tuple as key
-    pub pre_processed: Option<((u64, NodeId), Message)>,
-    pub registered_to: Vec<NodeId>,
-    pub chat_servers: Vec<NodeId>,
-    pub chat_contacts: Vec<(NodeId, NodeId)>,
-    pub sent: HashMap<(u64, u8), Message>,
-    pub received: HashMap<(u64, u8), Message>,
-    pub gui_command_receiver: Receiver<ChatCommand>,
-    pub gui_event_sender: Sender<ChatEvent>,
+    id: NodeId,                                   // Unique identifier for the client
+    controller_send: Sender<NodeEvent>, // Sender for communication with the controller
+    controller_recv: Receiver<NodeCommand>, // Receiver for commands from the controller
+    packet_recv: Receiver<Packet>,      // Receiver for incoming packets
+    packet_send: HashMap<NodeId, Sender<Packet>>, // Map of packet senders for neighbors
+    flood_ids: HashSet<(u64, NodeId)>,  // Set to track flood IDs for deduplication
+    client_topology: super::super::topology::Topology, // topology built by flooding
+    holder_sent: HashMap<(u64, NodeId), Vec<Packet>>, //fragment holder of sent messages, use session_id,src_id tuple as key
+    holder_frag_index: HashMap<(u64, NodeId), Vec<u64>>, //fragment indices holder for received packets, use session_id,src_id tuple as key
+    holder_rec: HashMap<(u64, NodeId), Vec<u8>>, //data holder of received messages, use session_id,src_id tuple as key
+    registered_to: Vec<NodeId>,
+    chat_servers: Vec<NodeId>,
+    chat_contacts: Vec<(NodeId, NodeId)>,
+    sent: HashMap<(u64, u8), Message>,
+    gui_command_receiver: Receiver<ChatCommand>,
+    gui_event_sender: Sender<ChatEvent>,
 }
 
 impl ChatClient {
@@ -74,32 +72,30 @@ impl ChatClient {
             holder_sent: HashMap::new(),
             holder_frag_index: HashMap::new(),
             holder_rec: HashMap::new(),
-            pre_processed: None,
             chat_servers: Vec::new(),
             registered_to: Vec::new(),
             chat_contacts: Vec::new(),
             sent: HashMap::new(),
-            received: HashMap::new(),
             gui_command_receiver,
             gui_event_sender,
         }
     }
 
-    pub fn send_register(&mut self, dst: NodeId) -> Result<(), String> {
+    fn send_register(&mut self, dst: NodeId) -> Result<(), String> {
         let new_req = Message::DefaultsRequest(DefaultsRequest::REGISTER);
         self.send_from_chat_client(dst, new_req)
     }
 
-    pub fn send_get_all_available(&mut self, dst: NodeId) -> Result<(), String> {
+    fn send_get_all_available(&mut self, dst: NodeId) -> Result<(), String> {
         let new_req = Message::DefaultsRequest(DefaultsRequest::GETALLAVAILABLE);
         self.send_from_chat_client(dst, new_req)
     }
 
-    pub fn send_msg_to(&mut self, dst: NodeId, chat_msg: Message) -> Result<(), String> {
+    fn send_msg_to(&mut self, dst: NodeId, chat_msg: Message) -> Result<(), String> {
         self.send_from_chat_client(dst, chat_msg)
     }
 
-    pub fn send_get_server_type(&mut self, dst: NodeId) -> Result<(), String> {
+    fn send_get_server_type(&mut self, dst: NodeId) -> Result<(), String> {
         let new_req = Message::DefaultsRequest(DefaultsRequest::GETSERVERTYPE);
         self.send_from_chat_client(dst, new_req)
     }
@@ -211,8 +207,6 @@ impl ChatClient {
                 }
             },
             Message::ChatMessages(cm) => {
-                self.received
-                    .insert((session_id, src_id), Message::ChatMessages(cm.clone()));
                 let _ = self.gui_event_sender.send(ChatEvent::NewMessage(cm));
                 Ok(ProcessChatResults::MSG)
             }
@@ -236,7 +230,7 @@ impl ChatClient {
                 // println!("Content Response");
                 Err(ProcessChatResults::ERR)
             }
-            Message::DefaultsRequest(rsp) => {
+            Message::DefaultsRequest(_rsp) => {
                 // println!("DefReq Response {:?}", rsp);
                 Err(ProcessChatResults::ERR)
             } // _ => {
@@ -304,10 +298,7 @@ impl ChatClient {
                 ) {
                     Some(m) => {
                         // println!("Handled Frag in Client");
-                        self.pre_processed = Some((
-                            (packet.session_id, packet.clone().routing_header.hops[0]),
-                            m.clone(),
-                        ));
+                        
                         let _processed = self.process_respsonse(
                             m.clone(),
                             packet.session_id,
@@ -333,9 +324,6 @@ impl ChatClient {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
-                            // NodeCommand::PacketShortcut(packet)=>{
-                            //     self.handle_packet(packet);
-                            // },
                             NodeCommand::AddSender(id,sender)=>{
                                 self.packet_send.insert(id, sender);
                             },
@@ -343,7 +331,6 @@ impl ChatClient {
                                 self.packet_send.remove(&id);
                                 self.client_topology.remove_node(id);
                             }
-                            _=>{}
                         }
                     }
                 },
@@ -379,7 +366,7 @@ impl ChatClient {
         }
     }
 
-    pub fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64) -> Result<(), &str> {
+    fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64) -> Result<(), &str> {
         if self.packet_send.is_empty() {
             Err("No neighbors in Client")
         } else {
@@ -525,7 +512,7 @@ impl ChatClient {
         }
     }
 
-    pub fn recv_flood_response_n_handle(
+    fn recv_flood_response_n_handle(
         &mut self,
         flood_packet: FloodResponse,
     ) -> Result<(), &str> {
@@ -541,7 +528,7 @@ impl ChatClient {
         return Ok(());
     }
 
-    pub fn recv_flood_request_n_handle(
+    fn recv_flood_request_n_handle(
         &mut self,
         session_id: u64,
         flood_packet: &mut FloodRequest,
@@ -573,7 +560,7 @@ impl ChatClient {
         return self.send_flood_response(&mut new_packet);
     }
 
-    pub fn recv_nack_n_handle(
+    fn recv_nack_n_handle(
         &mut self,
         session_id: u64,
         nack: Nack,
@@ -594,7 +581,7 @@ impl ChatClient {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[1]);
+                                        .increment_weights_for_node(packet.routing_header.hops[0]);
                                     return self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
@@ -605,7 +592,7 @@ impl ChatClient {
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[1]);
+                                        .increment_weights_for_node(packet.routing_header.hops[0]);
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -634,7 +621,7 @@ impl ChatClient {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[1]);
+                                        .increment_weights_for_node(packet.routing_header.hops[0]);
                                     return self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
@@ -728,7 +715,7 @@ impl ChatClient {
         return Err("No match found for session_id and fragment_index");
     }
 
-    pub fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
+    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
         if let Some(holder) = { self.holder_sent.get_mut(&(session_id, self.id)) } {
             if holder.is_empty(){
                 return Err("All fragments of corrisponding message have been received");
@@ -761,7 +748,7 @@ impl ChatClient {
         }
     }
 
-    pub fn recv_frag_n_handle(
+    fn recv_frag_n_handle(
         &mut self,
         session_id: u64,
         src: NodeId,
@@ -794,11 +781,9 @@ impl ChatClient {
                  if let Ok(msg) = result {
                         self.holder_rec.remove(&(session_id, src));
                         self.holder_frag_index.remove(&(session_id, src));
-                        self.pre_processed = Some(((session_id, src), msg.clone()));
                         // println!("Message Reconstructed");
                         return Some(msg.clone());
                     } else {
-                        self.pre_processed = None;
                         // println!("Message reconstruction failed");
                         return None;
                     }
@@ -994,146 +979,5 @@ mod tests {
             }
         }
         assert_eq!(1, 2);
-    }
-}
-pub mod gui_test {
-    use wg_2024::{controller::*, drone::Drone};
-
-    use crate::utils::backup_server::Server;
-
-    use super::*;
-    pub fn test_gui_channels_main() {
-        use std::collections::HashMap;
-        use std::thread;
-
-        let (_c1, c2) = unbounded::<NodeCommand>();
-        let (c3, _c4) = unbounded::<NodeEvent>();
-
-        // Shared Channels
-        let (c5, c6) = unbounded::<Packet>(); // Channel 1
-        let (c5_1, c6_1) = unbounded::<Packet>(); // Channel 2
-        let (c5_2, c6_2) = unbounded::<Packet>(); // Channel 3
-        let (_c5_3, _c6_3) = unbounded::<Packet>(); // Channel 4
-
-        let (c7_1, c7) = unbounded::<ChatCommand>();
-        let (c8, c8_1) = unbounded::<ChatEvent>();
-
-        let (c77_1, c77) = unbounded::<ChatCommand>();
-        let (c88, c88_1) = unbounded::<ChatEvent>();
-
-        // Drone
-        let (_c9, c10) = unbounded::<DroneCommand>();
-        let (c11, _c12) = unbounded::<DroneEvent>();
-
-        // First ChatClient (id: 1)
-        let mut hm1 = HashMap::new();
-        hm1.insert(2, c5_1.clone());
-
-        let mut dummy1 = ChatClient::new(
-            1,
-            c3.clone(),
-            c2.clone(),
-            c6.clone(),
-            hm1,
-            c7.clone(),
-            c8.clone(),
-        );
-
-        // Second ChatClient (id: 4)
-        let (c13, c14) = unbounded::<Packet>(); // Client 2's inbound
-        let mut hm2 = HashMap::new();
-        hm2.insert(2, c5_1.clone());
-
-        let mut dummy2 = ChatClient::new(
-            4,
-            c3.clone(),
-            c2.clone(),
-            c14.clone(),
-            hm2,
-            c77.clone(),
-            c88.clone(),
-        );
-
-        // Server
-        let mut server = Server::new(
-            3,
-            CHATSERVER,
-            c3.clone(),
-            c2.clone(),
-            c6_2.clone(),
-            HashMap::from([(2, c5_1.clone())]),
-        );
-
-        // Topology updates
-        dummy1.client_topology.update_topology(
-            (1, NodeType::Client),
-            vec![
-                (1, NodeType::Client),
-                (2, NodeType::Drone),
-                (3, NodeType::Server),
-            ],
-        );
-
-        dummy2.client_topology.update_topology(
-            (4, NodeType::Client),
-            vec![
-                (4, NodeType::Client),
-                (2, NodeType::Drone),
-                (3, NodeType::Server),
-            ],
-        );
-
-        server.server_topology.update_topology(
-            (3, NodeType::Server),
-            vec![
-                (3, NodeType::Server),
-                (2, NodeType::Drone),
-                (1, NodeType::Client),
-            ],
-        );
-
-        server.server_topology.update_topology(
-            (3, NodeType::Server),
-            vec![
-                (3, NodeType::Server),
-                (2, NodeType::Drone),
-                (4, NodeType::Client),
-            ],
-        );
-
-        let mut v = Vec::new();
-        let channels = crate::frontend::chat_gui::GuiChannels::new(c8_1, c7_1);
-        let channels_1 = crate::frontend::chat_gui::GuiChannels::new(c88_1, c77_1);
-        let hm = HashMap::from([(1, channels), (4, channels_1)]);
-        // Server thread
-        v.push(thread::spawn(move || {
-            server.handle_channels();
-        }));
-
-        // Drone thread
-        v.push(thread::spawn(move || {
-            let mut drone = d_r_o_n_e_drone::MyDrone::new(
-                2,
-                c11.clone(),
-                c10.clone(),
-                c6_1.clone(),
-                HashMap::from([(1, c5.clone()), (3, c5_2.clone()), (4, c13.clone())]),
-                0.00,
-            );
-            drone.run();
-        }));
-
-        // ChatClient 1 thread
-        v.push(thread::spawn(move || {
-            dummy1.handle_channels();
-        }));
-
-        // ChatClient 2 thread
-        v.push(thread::spawn(move || {
-            dummy2.handle_channels();
-        }));
-
-        // Launch GUI (main thread)
-        crate::frontend::chat_gui::main_gui(hm);
     }
 }

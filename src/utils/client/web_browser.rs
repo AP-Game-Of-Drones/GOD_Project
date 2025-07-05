@@ -34,24 +34,24 @@ enum ProcessWebResult {
 
 impl super::Client for WebBrowser {}
 pub struct WebBrowser {
-    pub id: NodeId,                                   // Unique identifier for the client
-    pub controller_send: Sender<NodeEvent>, // Sender for communication with the controller
-    pub controller_recv: Receiver<NodeCommand>, // Receiver for commands from the controller
-    pub packet_recv: Receiver<Packet>,      // Receiver for incoming packets
-    pub packet_send: HashMap<NodeId, Sender<Packet>>, // Map of packet senders for neighbors
-    pub flood_ids: HashSet<(u64, NodeId)>,  // Set to track flood IDs for deduplication
-    pub client_topology: super::super::topology::Topology, // topology built by flooding
-    pub holder_sent: HashMap<(u64, NodeId), Vec<Packet>>, //fragment holder of sent messages, use session_id,src_id tuple as key
-    pub holder_frag_index: HashMap<(u64, NodeId), Vec<u64>>, //fragment indices holder for received packets, use session_id,src_id tuple as key
-    pub holder_rec: HashMap<(u64, NodeId), Vec<u8>>, //data holder of received messages, use session_id,src_id tuple as key
-    pub pre_processed: Option<((u64, NodeId), Message)>,
-    pub sent: HashMap<(u64, u8), Message>,
-    pub text_servers: Vec<NodeId>,
-    pub media_servers: Vec<NodeId>,
-    pub media: HashMap<(u64, u8), Message>,
-    pub text: HashMap<(u64, u8), Vec<String>>,
-    pub gui_command_receiver: Receiver<WebCommand>,
-    pub gui_event_sender: Sender<WebEvent>,
+    id: NodeId,                                   // Unique identifier for the client
+    controller_send: Sender<NodeEvent>, // Sender for communication with the controller
+    controller_recv: Receiver<NodeCommand>, // Receiver for commands from the controller
+    packet_recv: Receiver<Packet>,      // Receiver for incoming packets
+    packet_send: HashMap<NodeId, Sender<Packet>>, // Map of packet senders for neighbors
+    flood_ids: HashSet<(u64, NodeId)>,  // Set to track flood IDs for deduplication
+    client_topology: super::super::topology::Topology, // topology built by flooding
+    holder_sent: HashMap<(u64, NodeId), Vec<Packet>>, //fragment holder of sent messages, use session_id,src_id tuple as key
+    holder_frag_index: HashMap<(u64, NodeId), Vec<u64>>, //fragment indices holder for received packets, use session_id,src_id tuple as key
+    holder_rec: HashMap<(u64, NodeId), Vec<u8>>, //data holder of received messages, use session_id,src_id tuple as key
+    pre_processed: Option<((u64, NodeId), Message)>,
+    sent: HashMap<(u64, u8), Message>,
+    text_servers: Vec<NodeId>,
+    media_servers: Vec<NodeId>,
+    media: HashMap<(u64, u8), Message>,
+    text: HashMap<(u64, u8), Vec<String>>,
+    gui_command_receiver: Receiver<WebCommand>,
+    gui_event_sender: Sender<WebEvent>,
 }
 
 impl WebBrowser {
@@ -328,7 +328,6 @@ impl WebBrowser {
                                 self.packet_send.remove(&id);
                                 self.client_topology.remove_node(id);
                             }
-                            _=>{}
                         }
                     }
                 },
@@ -377,7 +376,7 @@ impl WebBrowser {
         }
     }
 
-    pub fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64) -> Result<(), &str> {
+    fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64) -> Result<(), &str> {
         if self.packet_send.is_empty() {
             Err("No neighbors in Client")
         } else {
@@ -521,7 +520,7 @@ impl WebBrowser {
         }
     }
 
-    pub fn recv_flood_response_n_handle(
+    fn recv_flood_response_n_handle(
         &mut self,
         flood_packet: FloodResponse,
     ) -> Result<(), &str> {
@@ -536,7 +535,7 @@ impl WebBrowser {
         return Ok(());
     }
 
-    pub fn recv_flood_request_n_handle(
+    fn recv_flood_request_n_handle(
         &mut self,
         session_id: u64,
         flood_packet: &mut FloodRequest,
@@ -568,7 +567,7 @@ impl WebBrowser {
         return self.send_flood_response(&mut new_packet);
     }
 
-    pub fn recv_nack_n_handle(
+    fn recv_nack_n_handle(
         &mut self,
         session_id: u64,
         nack: Nack,
@@ -723,7 +722,7 @@ impl WebBrowser {
         return Err("No match found for session_id and fragment_index");
     }
 
-    pub fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
+    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
         if let Some(holder) = { self.holder_sent.get(&(session_id, self.id)) } {
             if holder.is_empty() && fragment_index == 0 {
                 return Err("All fragments of corrisponding message have been received");
@@ -756,7 +755,7 @@ impl WebBrowser {
         }
     }
 
-    pub fn recv_frag_n_handle(
+    fn recv_frag_n_handle(
         &mut self,
         session_id: u64,
         src: NodeId,
@@ -899,138 +898,5 @@ fn update_holder_rec(
 
         // Copy the fragment data into the correct position in the target vector
         target[finish_pos - length..finish_pos].copy_from_slice(&data[..length]);
-    }
-}
-
-pub mod gui_test {
-    use wg_2024::{controller::*, drone::Drone};
-
-    use crate::utils::backup_server::Server;
-
-    use super::*;
-    pub fn test_gui_channels_main() {
-        use std::collections::HashMap;
-        use std::thread;
-
-        let (_c1, c2) = unbounded::<NodeCommand>();
-        let (c3, _c4) = unbounded::<NodeEvent>();
-
-        // Shared Channels
-        let (c5, c6) = unbounded::<Packet>(); // Channel 1
-        let (c5_1, c6_1) = unbounded::<Packet>(); // Channel 2
-        let (c5_2, c6_2) = unbounded::<Packet>(); // Channel 3
-
-        let (c7_1, c7) = unbounded::<WebCommand>();
-        let (c8, c8_1) = unbounded::<WebEvent>();
-
-        // let (c77_1, c77) = unbounded::<ChatCommand>();
-        // let (c88, c88_1) = unbounded::<ChatEvent>();
-
-        // Drone
-        let (_c9, c10) = unbounded::<DroneCommand>();
-        let (c11, _c12) = unbounded::<DroneEvent>();
-
-        // First ChatClient (id: 1)
-        let mut hm1 = HashMap::new();
-        hm1.insert(2, c5_1.clone());
-
-        let mut dummy1 = WebBrowser::new(
-            1,
-            c3.clone(),
-            c2.clone(),
-            c6.clone(),
-            hm1,
-            c7.clone(),
-            c8.clone(),
-        );
-
-        // Second ChatClient (id: 4)
-        let (c13, c14) = unbounded::<Packet>(); // Client 2's inbound
-        let mut hm2 = HashMap::new();
-        hm2.insert(2, c5_1.clone());
-
-        let mut server_1 = Server::new(4, MEDIASERVER, c3.clone(), c2.clone(), c14.clone(), hm2);
-
-        // Server
-        let mut server_2 = Server::new(
-            3,
-            TEXTSERVER,
-            c3.clone(),
-            c2.clone(),
-            c6_2.clone(),
-            HashMap::from([(2, c5_1.clone())]),
-        );
-
-        // Topology updates
-        dummy1.client_topology.update_topology(
-            (1, NodeType::Client),
-            vec![
-                (1, NodeType::Client),
-                (2, NodeType::Drone),
-                (3, NodeType::Server),
-            ],
-        );
-
-        dummy1.client_topology.update_topology(
-            (1, NodeType::Client),
-            vec![
-                (1, NodeType::Client),
-                (2, NodeType::Drone),
-                (4, NodeType::Server),
-            ],
-        );
-
-        server_1.server_topology.update_topology(
-            (4, NodeType::Server),
-            vec![
-                (4, NodeType::Server),
-                (2, NodeType::Drone),
-                (1, NodeType::Client),
-            ],
-        );
-
-        server_2.server_topology.update_topology(
-            (3, NodeType::Server),
-            vec![
-                (3, NodeType::Server),
-                (2, NodeType::Drone),
-                (1, NodeType::Client),
-            ],
-        );
-
-        let mut v = Vec::new();
-        let channels = crate::frontend::web_gui::GuiChannels::new(c8_1, c7_1);
-        // let channels_1 = crate::frontend::web_gui::GuiChannels::new(c88_1, c77_1);
-        let hm = HashMap::from([(1, channels)]);
-        // Server thread
-        v.push(thread::spawn(move || {
-            server_2.handle_channels();
-        }));
-
-        // Drone thread
-        v.push(thread::spawn(move || {
-            let mut drone = ap2024_unitn_cppenjoyers_drone::CppEnjoyersDrone::new(
-                2,
-                c11.clone(),
-                c10.clone(),
-                c6_1.clone(),
-                HashMap::from([(1, c5.clone()), (3, c5_2.clone()), (4, c13.clone())]),
-                0.,
-            );
-            drone.run();
-        }));
-
-        // ChatClient 1 thread
-        v.push(thread::spawn(move || {
-            dummy1.handle_channels();
-        }));
-
-        // ChatClient 2 thread
-        v.push(thread::spawn(move || {
-            server_1.handle_channels();
-        }));
-
-        // Launch GUI (main thread)
-        crate::frontend::web_gui::main_gui(hm);
     }
 }

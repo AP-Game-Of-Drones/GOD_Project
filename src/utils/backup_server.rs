@@ -31,20 +31,17 @@ impl Servers for Server {}
 
 #[derive(Clone)]
 pub struct Server {
-    pub id: NodeId, // Unique identifier for the client
-    pub serv_type: u8,
-    pub controller_send: Sender<NodeEvent>, // Sender for communication with the controller
-    pub controller_recv: Receiver<NodeCommand>, // Receiver for commands from the controller
-    pub packet_recv: Receiver<Packet>,      // Receiver for incoming packets
-    pub packet_send: HashMap<NodeId, Sender<Packet>>, // Map of packet senders for neighbors
-    pub flood_ids: HashSet<(u64, NodeId)>,  // Set to track flood IDs for deduplication
-    pub server_topology: super::topology::Topology, // topology built by flooding
-    pub holder_sent: HashMap<(u64, NodeId), Vec<Packet>>, //fragment holder of sent messages, use session_id,src_id tuple as key
-    pub holder_frag_index: HashMap<(u64, NodeId), Vec<u64>>, //fragment indices holder for received packets, use session_id,src_id tuple as key
-    pub holder_rec: HashMap<(u64, NodeId), Vec<u8>>, //data holder of received messages, use session_id,src_id tuple as key
-    pub pre_processed: Option<((u64, NodeId), Message)>,
-    pub sent: HashMap<(u64, u8), Message>,
-    pub received: HashMap<(u64, u8), Message>,
+    id: NodeId, // Unique identifier for the client
+    serv_type: u8,
+    controller_send: Sender<NodeEvent>, // Sender for communication with the controller
+    controller_recv: Receiver<NodeCommand>, // Receiver for commands from the controller
+    packet_recv: Receiver<Packet>,      // Receiver for incoming packets
+    packet_send: HashMap<NodeId, Sender<Packet>>, // Map of packet senders for neighbors
+    flood_ids: HashSet<(u64, NodeId)>,  // Set to track flood IDs for deduplication
+    server_topology: super::topology::Topology, // topology built by flooding
+    holder_sent: HashMap<(u64, NodeId), Vec<Packet>>, //fragment holder of sent messages, use session_id,src_id tuple as key
+    holder_frag_index: HashMap<(u64, NodeId), Vec<u64>>, //fragment indices holder for received packets, use session_id,src_id tuple as key
+    holder_rec: HashMap<(u64, NodeId), Vec<u8>>, //data holder of received messages, use session_id,src_id tuple as key
     chatters: HashSet<NodeId>,
 }
 
@@ -69,9 +66,6 @@ impl Server {
             holder_sent: HashMap::new(),
             holder_frag_index: HashMap::new(),
             holder_rec: HashMap::new(),
-            pre_processed: None,
-            sent: HashMap::new(),
-            received: HashMap::new(),
             chatters: HashSet::new(),
         }
     }
@@ -98,7 +92,9 @@ impl Server {
     }
 
     fn handle_req(&mut self, request: Message, src_id: NodeId, session_id: u64) {
-        self.sent.insert((session_id, self.id), request.clone());
+        if let Some(holder) = self.holder_sent.get_mut(&(session_id,self.id)){
+            holder.clear();
+        }
         match request.clone() {
             Message::DefaultsRequest(df) => match &df {
                 DefaultsRequest::GETSERVERTYPE => {
@@ -217,7 +213,6 @@ impl Server {
                         );
                     }
                 }
-                _ => {}
             },
             Message::ContentRequest(cr) => match &cr {
                 ContentRequest::GETMEDIA(path) => {
@@ -428,10 +423,6 @@ impl Server {
                 ) {
                     Some(m) => {
                         // println!("msg in server {} \n \n ",self.id);
-                        self.pre_processed = Some((
-                            (packet.session_id, packet.clone().routing_header.hops[0]),
-                            m.clone(),
-                        ));
                         self.handle_req(
                             m.clone(),
                             packet.clone().routing_header.hops[0],
@@ -457,9 +448,6 @@ impl Server {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
-                            // NodeCommand::PacketShortcut(packet)=>{
-                            //     self.handle_packet(packet.clone());
-                            // },
                             NodeCommand::AddSender(id,sender)=>{
                                 self.packet_send.insert(id, sender);
                             },
@@ -467,7 +455,6 @@ impl Server {
                                 self.packet_send.remove(&id);
                                 self.server_topology.remove_node(id);
                             }
-                            _=>{}
                         }
                     }
                 },
@@ -483,7 +470,7 @@ impl Server {
         }
     }
 
-    pub fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64) -> Result<(), &str> {
+    fn send_new_flood_request(&mut self, session_id: u64, flood_id: u64) -> Result<(), &str> {
         if self.packet_send.is_empty() {
             Err("No neighbors in Server")
         } else {
@@ -914,11 +901,9 @@ impl Server {
                     if let Ok(msg) = result {
                         self.holder_rec.remove(&(session_id, src));
                         self.holder_frag_index.remove(&(session_id, src));
-                        self.pre_processed = Some(((session_id, src), msg.clone()));
                         // println!("Message Reconstructed");
                         return Some(msg.clone());
                     } else {
-                        self.pre_processed = None;
                         // println!("Message reconstruction failed");
                         return None;
                     }
@@ -1037,15 +1022,4 @@ fn read_file_to_lines(file_path: &str) -> Result<Vec<String>, std::io::Error> {
     reader
         .lines()
         .collect::<Result<Vec<String>, std::io::Error>>() // Use `Result::collect` to handle errors
-}
-
-#[cfg(test)]
-mod testing {
-    use crate::utils::backup_server::{ALLMEDIA, get_all};
-
-    #[test]
-    fn test_open() {
-        println!("{:?}", get_all(ALLMEDIA));
-        assert_eq!(1, 2);
-    }
 }

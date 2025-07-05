@@ -25,6 +25,7 @@ const CHAT_PATH: &str = "assets/chat/media/";
 pub struct ChatGuiPlugin {
     pub channels: GuiControllers,
 }
+
 impl Plugin for ChatGuiPlugin {
     fn build(&self, app: &mut App) {
         let (stream, handle) = rodio::OutputStream::try_default().unwrap();
@@ -45,32 +46,10 @@ impl Plugin for ChatGuiPlugin {
         app.add_systems(Update, ui_system);
     }
 }
-pub fn main_gui(channels: HashMap<u8, GuiChannels>) {
-    let (stream, handle) = rodio::OutputStream::try_default().unwrap();
-    let rodio_player = Box::new(RodioPlayer {
-        stream,
-        handle,
-        sinks: HashMap::new(),
-    });
 
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            EguiPlugin {
-                enable_multipass_for_primary_context: false,
-            },
-        ))
-        .insert_resource(GuiControllers::new(channels))
-        .insert_resource(TextureCache::default())
-        .insert_resource(MyRodioHandle(rodio_player))
-        .insert_resource(Attachments::default()) // <- Make sure it's added
-        .add_systems(Startup, setup)
-        .add_systems(Update, ui_system)
-        .run();
-}
 
 #[derive(Resource, Clone)]
-pub struct Attachments {
+struct Attachments {
     images: Vec<String>,
     audio: Vec<String>,
 }
@@ -133,30 +112,20 @@ impl Default for Attachments {
     }
 }
 
-pub struct RodioPlayer {
+struct RodioPlayer {
     stream: OutputStream,
     handle: OutputStreamHandle,
     sinks: HashMap<u64, Sink>, // keyed by message index or ID
 }
 
 #[derive(Resource)]
-pub struct MyRodioHandle(pub Box<RodioPlayer>);
+struct MyRodioHandle(pub Box<RodioPlayer>);
 unsafe impl Sync for MyRodioHandle {}
 unsafe impl Send for MyRodioHandle {}
 
-impl RodioPlayer {
-    pub fn new() -> Self {
-        let (stream, handle) = OutputStream::try_default().expect("Failed to get audio output");
-        RodioPlayer {
-            stream,
-            handle,
-            sinks: HashMap::new(),
-        }
-    }
-}
 
 #[derive(Resource, Default)]
-pub struct TextureCache {
+struct TextureCache {
     map: HashMap<u64, TextureHandle>,
 }
 
@@ -184,12 +153,12 @@ impl GuiControllers {
 }
 
 #[derive(Resource, Default, Clone)]
-pub struct ServerPanel {
+struct ServerPanel {
     servers: Vec<ServerInfo>,
 }
 
 #[derive(Resource, Clone)]
-pub struct ServerInfo {
+struct ServerInfo {
     id: u8,
     registered: HashMap<u8, bool>,
     selected: bool,
@@ -208,23 +177,23 @@ impl Default for ServerInfo {
 }
 
 #[derive(Resource, Default, Clone)]
-pub struct Contacts {
+struct Contacts {
     clients: HashMap<u8, Vec<(u8, bool)>>,
 }
 
 #[derive(Resource, Default, Clone)]
-pub struct ClientViewState {
-    pub selected_server: Option<u8>,
-    pub selected_client: Option<u8>,
-    pub chat_pages: HashMap<u8, ChatPage>,
-    pub input: HashMap<u8, String>,
+struct ClientViewState {
+    selected_server: Option<u8>,
+    selected_client: Option<u8>,
+    chat_pages: HashMap<u8, ChatPage>,
+    input: HashMap<u8, String>,
     attachments_state: bool,
 }
 
 #[derive(Resource, Default)]
-pub struct AppState {
-    pub selected_source_client: Option<u8>,
-    pub client_states: HashMap<u8, ClientViewState>,
+struct AppState {
+    selected_source_client: Option<u8>,
+    client_states: HashMap<u8, ClientViewState>,
 }
 
 const SENT: u8 = 0;
@@ -235,20 +204,15 @@ pub struct ChatPage {
     messages: Vec<(u64, u8, ChatMessages)>,
 }
 
-#[derive(Resource, Default)]
-pub struct ChatInput {
-    inputs: HashMap<u8, String>,
-}
 
 fn setup(mut commands: Commands) {
     commands.insert_resource(AppState::default());
-    commands.insert_resource(ChatInput::default());
     commands.insert_resource(ServerPanel::default());
     commands.insert_resource(Contacts::default());
     commands.insert_resource(ClientViewState::default());
 }
 
-pub fn ui_system(
+fn ui_system(
     mut egui_ctx: EguiContexts,
     mut app_state: ResMut<AppState>,
     mut servers: ResMut<ServerPanel>,
@@ -256,7 +220,7 @@ pub fn ui_system(
     channels: ResMut<GuiControllers>,
     mut rodio_player: ResMut<MyRodioHandle>,
     attachments: Res<Attachments>,
-    mut state: ResMut<super::MainState>,
+    state: Res<super::MainState>,
 ) {
     let ctx = egui_ctx.ctx_mut();
 
@@ -417,13 +381,6 @@ pub fn ui_system(
                                                     }
                                                 }
 
-                                                if ui.button("⏸ Pause").clicked() {
-                                                    if let Some(sink) = rodio_player.0.sinks.get(i)
-                                                    {
-                                                        sink.pause();
-                                                    }
-                                                }
-
                                                 if ui.button("⏹ Stop").clicked() {
                                                     if let Some(sink) =
                                                         rodio_player.0.sinks.remove(i)
@@ -472,134 +429,138 @@ pub fn ui_system(
                                                 egui::ScrollArea::vertical()
                                                     .id_salt("Images")
                                                     .show(&mut columns[0], |ui| {
-                                                        for img in &attachments.images {
-                                                            ui.label(img.to_string());
-                                                            if ui.button("Send").clicked() {
-                                                                let file_path =
-                                                                    std::env::current_exe()
-                                                                        .expect(
-                                                                            "Faild to get exe path",
-                                                                        )
-                                                                        .parent()
-                                                                        .unwrap()
-                                                                        .to_path_buf()
-                                                                        .parent()
-                                                                        .unwrap()
-                                                                        .to_path_buf()
-                                                                        .parent()
-                                                                        .unwrap()
-                                                                        .to_path_buf()
-                                                                        .join(
-                                                                            CHAT_PATH.to_string()
-                                                                                + "image/"
-                                                                                + img,
-                                                                        )
-                                                                        .to_str()
-                                                                        .unwrap()
-                                                                        .to_string();
+                                                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                                            for img in &attachments.images {
+                                                                ui.label(img.to_string());
+                                                                if ui.button("Send").clicked() {
+                                                                    let file_path =
+                                                                        std::env::current_exe()
+                                                                            .expect(
+                                                                                "Faild to get exe path",
+                                                                            )
+                                                                            .parent()
+                                                                            .unwrap()
+                                                                            .to_path_buf()
+                                                                            .parent()
+                                                                            .unwrap()
+                                                                            .to_path_buf()
+                                                                            .parent()
+                                                                            .unwrap()
+                                                                            .to_path_buf()
+                                                                            .join(
+                                                                                CHAT_PATH.to_string()
+                                                                                    + "image/"
+                                                                                    + img,
+                                                                            )
+                                                                            .to_str()
+                                                                            .unwrap()
+                                                                            .to_string();
 
-                                                                let image = image::open(file_path)
-                                                                    .expect("NOT OPENED");
-                                                                let msg =
-                                                                    ChatMessages::new_image_msg(
-                                                                        client_id,
-                                                                        server_id,
-                                                                        contact,
-                                                                        image.clone(),
-                                                                    );
-                                                                let _ = channels
-                                                                    .channels
-                                                                    .get(&client_id)
-                                                                    .unwrap()
-                                                                    .sender
-                                                                    .send(
-                                                                        ChatCommand::SendMessage(
+                                                                    let image = image::open(file_path)
+                                                                        .expect("NOT OPENED");
+                                                                    let msg =
+                                                                        ChatMessages::new_image_msg(
+                                                                            client_id,
                                                                             server_id,
-                                                                            Message::ChatMessages(
-                                                                                msg.clone(),
+                                                                            contact,
+                                                                            image.clone(),
+                                                                        );
+                                                                    let _ = channels
+                                                                        .channels
+                                                                        .get(&client_id)
+                                                                        .unwrap()
+                                                                        .sender
+                                                                        .send(
+                                                                            ChatCommand::SendMessage(
+                                                                                server_id,
+                                                                                Message::ChatMessages(
+                                                                                    msg.clone(),
+                                                                                ),
                                                                             ),
-                                                                        ),
-                                                                    );
-                                                                state.attachments_state = false;
-                                                                let entry = state
-                                                                    .chat_pages
-                                                                    .entry(contact)
-                                                                    .or_insert_with(|| ChatPage {
-                                                                        contact_id: contact,
-                                                                        messages: Vec::new(),
-                                                                    });
-                                                                entry
-                                                                    .messages
-                                                                    .push((int, SENT, msg));
+                                                                        );
+                                                                    state.attachments_state = false;
+                                                                    let entry = state
+                                                                        .chat_pages
+                                                                        .entry(contact)
+                                                                        .or_insert_with(|| ChatPage {
+                                                                            contact_id: contact,
+                                                                            messages: Vec::new(),
+                                                                        });
+                                                                    entry
+                                                                        .messages
+                                                                        .push((int, SENT, msg));
+                                                                }
                                                             }
-                                                        }
+                                                        });
                                                     });
                                                 egui::ScrollArea::vertical()
-                                                    .id_salt("Images")
+                                                    .id_salt("Audios")
                                                     .show(&mut columns[1], |ui| {
-                                                        for track in &attachments.audio {
-                                                            ui.label(track.to_string());
-                                                            if ui.button("Send").clicked() {
-                                                                let file_path =
-                                                                    std::env::current_exe()
-                                                                        .expect(
-                                                                            "Faild to get exe path",
-                                                                        )
-                                                                        .parent()
-                                                                        .unwrap()
-                                                                        .to_path_buf()
-                                                                        .parent()
-                                                                        .unwrap()
-                                                                        .to_path_buf()
-                                                                        .parent()
-                                                                        .unwrap()
-                                                                        .to_path_buf()
-                                                                        .join(
-                                                                            CHAT_PATH.to_string()
-                                                                                + "audio/"
-                                                                                + track,
-                                                                        )
-                                                                        .to_str()
-                                                                        .unwrap()
-                                                                        .to_string();
-                                                                let data = fs::read(file_path)
-                                                                    .expect("NOT OPENED");
-                                                                let audio = AudioSource {
-                                                                    bytes: Arc::from(data),
-                                                                };
-                                                                let msg =
-                                                                    ChatMessages::new_audio_msg(
-                                                                        client_id,
-                                                                        server_id,
-                                                                        contact,
-                                                                        audio.clone(),
-                                                                    );
-                                                                let _ = channels
-                                                                    .channels
-                                                                    .get(&client_id)
-                                                                    .unwrap()
-                                                                    .sender
-                                                                    .send(
-                                                                        ChatCommand::SendMessage(
+                                                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                                            for track in &attachments.audio {
+                                                                ui.label(track.to_string());
+                                                                if ui.button("Send").clicked() {
+                                                                    let file_path =
+                                                                        std::env::current_exe()
+                                                                            .expect(
+                                                                                "Faild to get exe path",
+                                                                            )
+                                                                            .parent()
+                                                                            .unwrap()
+                                                                            .to_path_buf()
+                                                                            .parent()
+                                                                            .unwrap()
+                                                                            .to_path_buf()
+                                                                            .parent()
+                                                                            .unwrap()
+                                                                            .to_path_buf()
+                                                                            .join(
+                                                                                CHAT_PATH.to_string()
+                                                                                    + "audio/"
+                                                                                    + track,
+                                                                            )
+                                                                            .to_str()
+                                                                            .unwrap()
+                                                                            .to_string();
+                                                                    let data = fs::read(file_path)
+                                                                        .expect("NOT OPENED");
+                                                                    let audio = AudioSource {
+                                                                        bytes: Arc::from(data),
+                                                                    };
+                                                                    let msg =
+                                                                        ChatMessages::new_audio_msg(
+                                                                            client_id,
                                                                             server_id,
-                                                                            Message::ChatMessages(
-                                                                                msg.clone(),
+                                                                            contact,
+                                                                            audio.clone(),
+                                                                        );
+                                                                    let _ = channels
+                                                                        .channels
+                                                                        .get(&client_id)
+                                                                        .unwrap()
+                                                                        .sender
+                                                                        .send(
+                                                                            ChatCommand::SendMessage(
+                                                                                server_id,
+                                                                                Message::ChatMessages(
+                                                                                    msg.clone(),
+                                                                                ),
                                                                             ),
-                                                                        ),
-                                                                    );
-                                                                state.attachments_state = false;
-                                                                let entry = state
-                                                                    .chat_pages
-                                                                    .entry(contact)
-                                                                    .or_insert_with(|| ChatPage {
-                                                                        contact_id: contact,
-                                                                        messages: Vec::new(),
-                                                                    });
-                                                                entry
-                                                                    .messages
-                                                                    .push((int, SENT, msg));
+                                                                        );
+                                                                    state.attachments_state = false;
+                                                                    let entry = state
+                                                                        .chat_pages
+                                                                        .entry(contact)
+                                                                        .or_insert_with(|| ChatPage {
+                                                                            contact_id: contact,
+                                                                            messages: Vec::new(),
+                                                                        });
+                                                                    entry
+                                                                        .messages
+                                                                        .push((int, SENT, msg));
+                                                                }
                                                             }
-                                                        }
+                                                        });
                                                     });
                                             }
                                         });

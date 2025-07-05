@@ -20,9 +20,6 @@ use wg_2024::{
     packet::Packet,
 };
 
-use super::backup_server::*;
-
-
 fn parse_config(file: &str) -> Config {
     println!("{file}");
     let file_str = fs::read_to_string(file).unwrap();
@@ -69,18 +66,18 @@ fn helper3(config: &Config) -> u8 {
     let mut rng = rand::thread_rng();
     let val = rng.r#gen::<u8>();
     let mut res = 0;
-    if c_len == 1 {
+    if c_len == 1  && s_len>1{
         res = WEBAPP;
     } else if c_len == 2 {
-        if s_len == 1 || s_len == 2 {
+        if s_len == 1 {
             res = CHATAPP;
-        } else if s_len > 2 {
+        } else if s_len > 1 {
             res = val % 2;
         }
     } else if c_len > 3 {
-        if s_len <= 3 {
+        if s_len <= 1 {
             res = CHATAPP
-        } else if s_len >= 4 {
+        } else if s_len >= 2 {
             res = val % 2;
         }
     }
@@ -650,7 +647,14 @@ fn check_initializer(path_to_file: &str) -> bool {
     let mut last = 0;
     let mut res = true;
      
-    if config.client.len()<1 || config.server.len()<1 || config.drone.len() < 2 {
+    if config.drone.len() < 2 {
+        println!("Configs Restriction not met: Drones must be > 1 ");
+        res = false;
+    } else if (config.client.len()<2 && config.server.len()<2) 
+            || config.client.len()==0 
+            || config.server.len()==0  
+    {
+        println!("Configs Restriction not met: Servers must be > 1 and Client >2 for ChatApp; Servers must be > 2 and Client >1 for ChatApp;");
         res = false;
     } else {
         if check_bidirectionality(&config) {
@@ -718,8 +722,6 @@ fn check_initializer(path_to_file: &str) -> bool {
 
 #[cfg(test)]
 mod test {
-    use wg_2024::config;
-
     use super::*;
 
     #[test]
@@ -743,21 +745,14 @@ mod test {
         assert_eq!(check_neighbors_id(1, &neighbors_not), false);
     }
 
-    #[test]
-    fn test_init_diff() {
-        while let Some(h) = initialize("./configs/config.toml",false).unwrap().0.pop() {
-            assert_eq!(1, 2);
-        }
-    }
-
     // #[test]
     fn check_build() {
         let config = parse_config("./configs/config.toml");
         let mut dd = HashMap::new();
         let mut controller_drones = HashMap::new();
-        let (drone_event_send, drone_event_recv) = unbounded();
+        let (drone_event_send, _drone_event_recv) = unbounded();
         // let mut cs_controller = HashMap::new();
-        let (cs_send, cs_recv) = unbounded::<NodeEvent>();
+        let (_cs_send, _cs_recv) = unbounded::<NodeEvent>();
 
         let mut packet_channels = HashMap::new();
         for drone in config.drone.iter() {
@@ -772,9 +767,8 @@ mod test {
 
         let mut handles = Vec::new();
 
-        let mut counters = [0; 10];
         // let mut handles_c = Vec::new();
-        let len = config.drone.len();
+        let _len = config.drone.len();
         for drone in config.drone.into_iter() {
             // controller
             let (controller_drone_send, controller_drone_recv) = unbounded();
@@ -813,9 +807,6 @@ mod test {
 
                 // wg_2024::drone::Drone::run(&mut drone);
             }));
-        }
-        while let Some(d) = handles.pop() {
-            d.join();
         }
         assert_eq!(1, 2);
     }

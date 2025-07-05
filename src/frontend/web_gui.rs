@@ -41,53 +41,19 @@ impl Plugin for WebGuiPlugin {
     }
 }
 
-pub fn main_gui(channels: HashMap<u8, GuiChannels>) {
-    let (stream, handle) = rodio::OutputStream::try_default().unwrap();
-    let rodio_player = Box::new(RodioPlayer {
-        stream,
-        handle,
-        sinks: HashMap::new(),
-    });
-
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            EguiPlugin {
-                enable_multipass_for_primary_context: false,
-            },
-        ))
-        .insert_resource(GuiControllers::new(channels))
-        .insert_resource(TextureCache::default())
-        .insert_resource(MyRodioHandle(rodio_player)) // <- Make sure it's added
-        .add_systems(Startup, setup)
-        .add_systems(Update, ui_system)
-        .run();
-}
-
-pub struct RodioPlayer {
+struct RodioPlayer {
     stream: OutputStream,
     handle: OutputStreamHandle,
     sinks: HashMap<u64, Sink>, // keyed by message index or ID
 }
 
 #[derive(Resource)]
-pub struct MyRodioHandle(pub Box<RodioPlayer>);
+struct MyRodioHandle( Box<RodioPlayer>);
 unsafe impl Sync for MyRodioHandle {}
 unsafe impl Send for MyRodioHandle {}
 
-impl RodioPlayer {
-    pub fn new() -> Self {
-        let (stream, handle) = OutputStream::try_default().expect("Failed to get audio output");
-        RodioPlayer {
-            stream,
-            handle,
-            sinks: HashMap::new(),
-        }
-    }
-}
-
 #[derive(Resource, Default)]
-pub struct TextureCache {
+struct TextureCache {
     map: HashMap<u64, TextureHandle>,
 }
 
@@ -115,33 +81,30 @@ impl GuiControllers {
 }
 
 #[derive(Resource, Default, Clone)]
-pub struct WebViewState {
-    pub selected_server: Option<u8>,
-    pub selected_browser: Option<u8>,
-    pub web_pages: WebPage,
-    pub input: HashMap<u8, String>,
+struct WebViewState {
+    web_pages: WebPage,
 }
 
 #[derive(Resource, Default)]
-pub struct AppState {
-    pub selected_source_client: Option<u8>,
-    pub browsers_states: HashMap<u8, WebViewState>,
-    pub error_state: bool
+struct AppState {
+    selected_source_client: Option<u8>,
+    browsers_states: HashMap<u8, WebViewState>,
+    error_state: bool
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct WebPage {
+struct WebPage {
     default: Vec<DefaultResponse>,
     content: Vec<ContentResponse>,
 }
 
 #[derive(Resource, Default, Clone)]
-pub struct ServerPanel {
+struct ServerPanel {
     servers: Vec<ServerInfo>,
 }
 
 #[derive(Resource, Clone)]
-pub struct ServerInfo {
+struct ServerInfo {
     id: u8,
     server_type: u8,
 }
@@ -156,9 +119,14 @@ impl Default for ServerInfo {
 }
 
 #[derive(Resource, Default)]
-pub struct MediaViewer {
+struct ImageViewer {
     open: bool,
     current_image_id: Option<u64>,
+}
+
+#[derive(Resource, Default)]
+struct AudioPlayer {
+    open: bool,
     current_audio_id: Option<u64>,
 }
 
@@ -166,17 +134,19 @@ fn setup(mut commands: Commands) {
     commands.insert_resource(AppState::default());
     commands.insert_resource(WebViewState::default());
     commands.insert_resource(ServerPanel::default());
-    commands.insert_resource(MediaViewer::default());
+    commands.insert_resource(ImageViewer::default());
+    commands.insert_resource(AudioPlayer::default());
 }
 
-pub fn ui_system(
+fn ui_system(
     mut egui_ctx: EguiContexts,
     mut app_state: ResMut<AppState>,
     mut cache: ResMut<TextureCache>,
     channels: ResMut<GuiControllers>,
     mut rodio_player: ResMut<MyRodioHandle>,
     mut servers: ResMut<ServerPanel>,
-    mut media_viewer: ResMut<MediaViewer>,
+    mut image_viewer: ResMut<ImageViewer>,
+    mut audio_player: ResMut<AudioPlayer>,
     state: Res<MainState>,
 ) {
     let ctx = egui_ctx.ctx_mut();
@@ -373,101 +343,101 @@ pub fn ui_system(
                                                 let texture =
                                                     handle_incoming_image(&img, ctx, &mut cache, id);
                                                 if ui.button("📷").clicked() {
-                                                    media_viewer.open = true;
-                                                    media_viewer.current_image_id = Some(id); // <-- your actual image ID here
+                                                    image_viewer.open = true;
+                                                    image_viewer.current_image_id = Some(id); // <-- your actual image ID here
                                                 }
-                                                if media_viewer.open
-                                                    && media_viewer.current_image_id.is_some()
+                                                if image_viewer.open
+                                                    && image_viewer.current_image_id.is_some()
                                                 {
-                                                    egui::Window::new("Image Viewer")
-                                                        .collapsible(false)
-                                                        .resizable(true)
-                                                        .default_size([300.0, 300.0])
-                                                        .show(ctx, |ui| {
-                                                            if let Some(id) =
-                                                                media_viewer.current_image_id
-                                                            {
+                                                    if let Some(id_1) =
+                                                        image_viewer.current_image_id
+                                                    {
+                                                        if id_1==id {
+
+                                                            egui::Window::new("Image Viewer")
+                                                            .collapsible(false)
+                                                            .resizable(true)
+                                                            .default_size([300.0, 300.0])
+                                                            .show(ctx, |ui| {
                                                                 if let Some(_d_texture) =
-                                                                    cache.map.get(&id)
+                                                                cache.map.get(&id)
                                                                 {
                                                                     let size = texture.size_vec2();
                                                                     ui.add(
                                                                         egui::Image::new(&texture)
-                                                                            .fit_to_exact_size(size),
+                                                                        .fit_to_exact_size(size),
                                                                     );
                                                                 } else {
                                                                     ui.label(
                                                                         "Image not found in cache.",
                                                                     );
                                                                 }
-                                                            }
-                                                        
-                                                            if ui.button("❌ Close").clicked() {
-                                                                media_viewer.open = false;
-                                                                media_viewer.current_image_id = None;
-                                                            }
-                                                        });
+                                                                
+                                                                if ui.button("❌ Close").clicked() {
+                                                                    image_viewer.open = false;
+                                                                    image_viewer.current_image_id = None;
+                                                                }
+                                                            });
+                                                        }
+                                                    }
                                                 }
                                             }
                                             ContentResponse::MEDIAUDIO(track) => {
                                                 let i = audio_hash(&track);
                                                 if ui.button("🎙️").clicked() {
-                                                    media_viewer.open = true;
-                                                    media_viewer.current_audio_id = Some(i); // <-- your actual image ID here
+                                                    audio_player.open = true;
+                                                    audio_player.current_audio_id = Some(i); // <-- your actual image ID here
                                                 }
-                                                if media_viewer.open
-                                                    && media_viewer.current_audio_id.is_some()
+                                                if audio_player.open
+                                                    && audio_player.current_audio_id.is_some()
                                                 {
-                                                    egui::Window::new("Audio")
-                                                        .collapsible(false)
-                                                        .resizable(true)
-                                                        .default_size([100.0, 300.0])
-                                                        .show(ctx, |ui| {
-                                                            if ui.button("▶ Play").clicked() {
-                                                                if let Some(track_bytes) =
-                                                                    Some(&track.bytes)
-                                                                {
-                                                                    let cursor = Cursor::new(
-                                                                        track_bytes.clone(),
-                                                                    );
-                                                                    if let Ok(source) =
-                                                                        Decoder::new(cursor)
-                                                                    {
-                                                                        if let Ok(sink) = Sink::try_new(
-                                                                            &rodio_player.0.handle,
-                                                                        ) {
-                                                                            sink.append(source);
-                                                                            rodio_player
-                                                                                .0
-                                                                                .sinks
-                                                                                .insert(i, sink);
+                                                    if let Some(id) = audio_player.current_audio_id {
+                                                        if i==id {
+                                                            egui::Window::new("Audio")
+                                                                .collapsible(false)
+                                                                .resizable(true)
+                                                                .default_size([100.0, 300.0])
+                                                                .show(ctx, |ui| {
+                                                                    if ui.button("▶ Play").clicked() {
+                                                                        if let Some(track_bytes) =
+                                                                            Some(&track.bytes)
+                                                                        {
+                                                                            let cursor = Cursor::new(
+                                                                                track_bytes.clone(),
+                                                                            );
+                                                                            if let Ok(source) =
+                                                                                Decoder::new(cursor)
+                                                                            {
+                                                                                if let Ok(sink) = Sink::try_new(
+                                                                                    &rodio_player.0.handle,
+                                                                                ) {
+                                                                                    sink.append(source);
+                                                                                    rodio_player
+                                                                                        .0
+                                                                                        .sinks
+                                                                                        .insert(i, sink);
+                                                                                }
+                                                                            } else {
+                                                                                error!(
+                                                                                    "Failed to decode audio"
+                                                                                );
+                                                                            }
                                                                         }
-                                                                    } else {
-                                                                        error!(
-                                                                            "Failed to decode audio"
-                                                                        );
+                                                                    }
+                                                                if ui.button("⏹ Stop").clicked() {
+                                                                    if let Some(sink) =
+                                                                        rodio_player.0.sinks.remove(&i)
+                                                                    {
+                                                                        sink.stop();
                                                                     }
                                                                 }
-                                                            }
-                                                            if ui.button("⏸ Pause").clicked() {
-                                                                if let Some(sink) =
-                                                                    rodio_player.0.sinks.get(&i)
-                                                                {
-                                                                    sink.pause();
+                                                                if ui.button("❌ Close").clicked() {
+                                                                    audio_player.open = false;
+                                                                    audio_player.current_audio_id = None;
                                                                 }
-                                                            }
-                                                            if ui.button("⏹ Stop").clicked() {
-                                                                if let Some(sink) =
-                                                                    rodio_player.0.sinks.remove(&i)
-                                                                {
-                                                                    sink.stop();
-                                                                }
-                                                            }
-                                                            if ui.button("❌ Close").clicked() {
-                                                                media_viewer.open = false;
-                                                                media_viewer.current_audio_id = None;
-                                                            }
-                                                        });
+                                                            });
+                                                        }
+                                                    }
                                                 }
                                             }
                                             _ => {}
@@ -578,7 +548,7 @@ fn handle_incoming_image(
     cache: &mut TextureCache,
     id: u64,
 ) -> TextureHandle {
-    if let Some(handle) = cache.map.get(&id) {
+    if let Some(handle) = cache.map.get_mut(&id) {
         return handle.clone();
     }
 

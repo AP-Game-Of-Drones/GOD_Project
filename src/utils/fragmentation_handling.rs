@@ -1,10 +1,5 @@
 use bevy::audio::AudioSource;
 use flate2::Compression;
-use flate2::bufread::{ZlibDecoder as BufDecoder, ZlibEncoder as BufEncoder};
-use flate2::read::ZlibDecoder;
-use flate2::read::ZlibDecoder as ReadZlibDecoder;
-use flate2::read::ZlibEncoder as ReadZlibEncoder;
-use flate2::write::ZlibEncoder;
 use image::*;
 use std::{io::Cursor, sync::Arc};
 use wg_2024::{network::*, packet::*};
@@ -318,28 +313,6 @@ pub enum DefaultsRequest {
     GETALLMEDIALINKS, //request all media links insede of content server
     GETALLAVAILABLE,  //get all client available for chatting
     GETSERVERTYPE,    //get servertype
-}
-
-impl DefaultsRequest {
-    fn new_register_req() -> Self {
-        Self::REGISTER
-    }
-
-    fn new_get_all_text_req() -> Self {
-        Self::GETALLTEXT
-    }
-
-    fn new_get_all_media_req() -> Self {
-        Self::GETALLMEDIALINKS
-    }
-
-    fn new_get_all_chatters_req() -> Self {
-        Self::GETALLAVAILABLE
-    }
-
-    fn new_get_server_type() -> Self {
-        Self::GETSERVERTYPE
-    }
 }
 
 impl Fragmentation<DefaultsRequest> for DefaultsRequest {
@@ -1110,7 +1083,7 @@ mod test {
 
     use std::{
         fs::{self, File},
-        io::{BufRead, BufReader, Read},
+        io::{BufRead, BufReader},
     };
 
     use super::*;
@@ -1195,7 +1168,7 @@ mod test {
     fn test5() {
         let img = image::open("./assets/test/media/image/drone.png").expect("Failed to open image");
 
-        let mut frags =
+        let frags =
             <image::DynamicImage as Fragmentation<image::DynamicImage>>::fragment(img.clone());
         let mut series = serialize(frags.clone());
         let assembly: Result<DynamicImage, String> =
@@ -1272,7 +1245,7 @@ mod test {
     fn test9() {
         let dfrsp = DefaultResponse::REGISTERED(true, 1);
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
-        let mut ser = serialize(fr.clone());
+        let ser = serialize(fr.clone());
         let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
         if asmb.is_ok() {
             match asmb.ok().unwrap() {
@@ -1301,7 +1274,7 @@ mod test {
             .to_vec(),
         );
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
-        let mut ser = serialize(fr);
+        let ser = serialize(fr);
         let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
         if asmb.clone().is_ok() {
             match asmb.clone().ok().unwrap() {
@@ -1336,7 +1309,7 @@ mod test {
 
         let dfrsp: DefaultResponse = DefaultResponse::ALLMEDIALINKS(file.clone());
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
-        let mut ser = serialize(fr);
+        let ser = serialize(fr);
         let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
         if asmb.is_ok() {
             match asmb.ok().unwrap() {
@@ -1356,7 +1329,7 @@ mod test {
     fn test12() {
         let dfrsp = DefaultResponse::ALLAVAILABLE([11, 22, 44, 55].to_vec());
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
-        let mut ser = serialize(fr);
+        let ser = serialize(fr);
         let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
         match asmb {
             Ok(df) => match df.clone() {
@@ -1377,7 +1350,7 @@ mod test {
     fn test13() {
         let dfrsp = DefaultResponse::SERVERTYPE(1, 12);
         let fr = <DefaultResponse as Fragmentation<DefaultResponse>>::fragment(dfrsp.clone());
-        let mut ser = serialize(fr);
+        let ser = serialize(fr);
         let asmb = <DefaultResponse as Assembler<DefaultResponse>>::assemble(&mut ser.clone());
         if asmb.is_ok() {
             match asmb.ok().unwrap() {
@@ -1431,7 +1404,7 @@ mod test {
             .to_vec(),
         );
         let fr = <ContentResponse as Fragmentation<ContentResponse>>::fragment(dfrsp.clone());
-        let mut ser = serialize(fr);
+        let ser = serialize(fr);
         let asmb = <ContentResponse as Assembler<ContentResponse>>::assemble(&mut ser.clone());
         if asmb.is_ok() {
             match asmb.ok().unwrap() {
@@ -1455,7 +1428,7 @@ mod test {
                 .unwrap(),
         );
         let fr = <ContentResponse as Fragmentation<ContentResponse>>::fragment(dfrsp.clone());
-        let mut ser = serialize(fr);
+        let ser = serialize(fr);
         let asmb = <ContentResponse as Assembler<ContentResponse>>::assemble(&mut ser.clone());
         if asmb.is_ok() {
             match asmb.ok().unwrap() {
