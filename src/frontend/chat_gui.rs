@@ -434,6 +434,11 @@ fn ui_system(
                                     .show(ctx, |ui| {
                                         ui.columns(2, |columns| {
                                             if let Some(server_id) = state.selected_server {
+                                                if let Some(server) = servers.servers.iter().find(|s| {
+                                                    s.id == server_id
+                                                        && s.selected
+                                                        && *s.registered.get(&client_id).unwrap_or(&false)
+                                                }){
                                                 egui::ScrollArea::vertical()
                                                     .id_salt("Images")
                                                     .show(&mut columns[0], |ui| {
@@ -570,6 +575,7 @@ fn ui_system(
                                                             }
                                                         });
                                                     });
+                                                }
                                             }
                                         });
                                     });
@@ -577,6 +583,11 @@ fn ui_system(
 
                             if ui.button("Send").clicked() {
                                 if let Some(server_id) = state.selected_server {
+                                    if let Some(_server) = servers.servers.iter().find(|s| {
+                                        s.id == server_id
+                                            && s.selected
+                                            && *s.registered.get(&client_id).unwrap_or(&false)
+                                    }){
                                     if !text.is_empty() {
                                         let msg = ChatMessages::new_string_msg(
                                             client_id,
@@ -601,6 +612,7 @@ fn ui_system(
                                         entry.messages.push((int, SENT, msg));
                                         text.clear();
                                     }
+                                }
                                 }
                             }
                         });

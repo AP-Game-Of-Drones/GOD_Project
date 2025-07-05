@@ -582,11 +582,12 @@ impl ChatClient {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
                                         .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    return self.send_new_generic_fragment(
+                                    while self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
                                         f.clone(),
-                                    );
+                                    ).is_err(){};
+                                    return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
@@ -622,11 +623,12 @@ impl ChatClient {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
                                         .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    return self.send_new_generic_fragment(
+                                    while self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
                                         f.clone(),
-                                    );
+                                    ).is_err(){};
+                                    return Ok(());
                                 }
                             }
                             _ => {
@@ -650,11 +652,12 @@ impl ChatClient {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    return self.send_new_generic_fragment(
+                                    while self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
                                         f.clone(),
-                                    );
+                                    ).is_err(){};
+                                    return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
@@ -685,11 +688,12 @@ impl ChatClient {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology.increment_weights_for_node(id);
-                                    return self.send_new_generic_fragment(
+                                    while self.send_new_generic_fragment(
                                         *p.routing_header.hops.last().unwrap(),
                                         session_id,
                                         f.clone(),
-                                    );
+                                    ).is_err(){};
+                                    return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
