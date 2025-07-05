@@ -154,6 +154,7 @@ pub fn crash(simulation_controller: &mut SimulationController, id: u8, neighbour
         .send(DroneCommand::Crash)
     {
         Ok(_) => {
+            //thread::sleep(std::time::Duration::from_millis(1000)); //getdroned doesn't crash if sender is removed fast
             simulation_controller.sender_drone_command.remove(&id);
             info!("Sent crash to {}", id);
             for neighbour in neighbours {

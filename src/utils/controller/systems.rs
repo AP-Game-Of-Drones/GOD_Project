@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-
+use bevy::transform;
 use super::super::super::frontend::MainState;
 use super::super::controller::*;
 use rand::Rng;
@@ -867,7 +867,7 @@ pub fn packet_spawn(
                     if let Some((_, _, end_transform)) = node_query.iter().find(|(_, node, _)| node.id == end_id) {
                         commands.spawn((
                             Sprite::from_image(asset_server.load("controller/packet.png")),
-                            Transform::from_translation(start_transform.translation),
+                            Transform::from_translation(start_transform.translation).with_scale(Vec3::splat(0.5)),
                             PacketMotion {
                                 start: start_transform.translation,
                                 end: end_transform.translation,

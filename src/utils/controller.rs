@@ -171,9 +171,9 @@ impl Plugin for SimulationControllerPlugin {
             Update,
             (
                 crossbeam_listener,
-                // packet_spawn,
-                // packet_add_hop.after(packet_spawn),
-                // packet_move,
+                packet_spawn,
+                packet_add_hop.after(packet_spawn),
+                packet_move,
                 update_packet_ends,
                 button_system,
                 button_action,
