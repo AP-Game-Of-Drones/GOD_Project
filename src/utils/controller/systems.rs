@@ -282,75 +282,46 @@ pub fn crash_target(
                     *warn_text = Text::from(format!("A Server must always be connected to at least 2 drones"));
                     return;
                 }
-                components::NodeType::Drone => {
+                _ => {}
+        }
 
-                    let mut topology = HashMap::<u8, Vec<u8>>::new();
+            let mut topology = HashMap::<u8, Vec<u8>>::new();
+            let mut id = 0;
+            for (_, node) in node_query.iter().filter(|(_, n)| n.id != id_to_remove) {
+                let filtered_ids = node
+                    .connected_node_ids
+                    .iter()
+                    .filter(|&id| *id != node_to_remove.id)
+                    .cloned()
+                    .collect();
 
-                    for (_, node) in node_query.iter().filter(|(_, n)| n.id != id_to_remove) {
+                id = node.id.clone();
+                topology.insert(node.id, filtered_ids);
+            }
 
-                        let filtered_ids = node
-                            .connected_node_ids
-                            .iter()
-                            .filter(|&id| *id != node_to_remove.id)
-                            .cloned()
-                            .collect();
+            let mut visited = HashSet::new();
+            let mut stack = VecDeque::new();
 
-                        topology.insert(node.id, filtered_ids);
-                    }
+            stack.push_back(id);
 
-                    let mut visited = HashSet::new();
-                    let mut stack = Vec::new();
-
-                    for (_, node) in node_query.iter() {
-                        if node.node_type == components::NodeType::Client || node.node_type == components::NodeType::Server {
-                            stack.push(node.id);
-                            visited.insert(node.id);
-                        }
-                    }
-
-                    let drone_ids: Vec<u8> = node_query
-                        .iter()
-                        .filter(|(_, n)| n.node_type == components::NodeType::Drone && n.id != node_to_remove.id)
-                        .map(|(_, n)| n.id)
-                        .collect();
-
-                    for &drone_id in &drone_ids {
-                        let mut visited = HashSet::new();
-                        let mut stack = vec![drone_id];
-                        let mut connected_to_client_or_server = false;
-
-                        while let Some(current) = stack.pop() {
-                            if !visited.insert(current) {
-                                continue;
-                            }
-
-                            if let Some((_, node)) = node_query.iter().find(|(_, n)| n.id == current) {
-                                if node.node_type == components::NodeType::Client || node.node_type == components::NodeType::Server {
-                                    connected_to_client_or_server = true;
-                                    break;
-                                }
-                            }
-
-                            if let Some(neighbors) = topology.get(&current) {
-                                for &neighbor in neighbors {
-                                    if !visited.contains(&neighbor) {
-                                        stack.push(neighbor);
-                                    }
-                                }
-                            }
-                        }
-
-                        if !connected_to_client_or_server {
-                            *warn_text = Text::from(format!("No isolated Drones allowed"));
-                            return;
-                        }
+            println!("id {}",id);
+            while let Some(current) = stack.pop_front() {
+                if visited.insert(current) {
+                    for id in topology.get(&current).unwrap() {
+                        stack.push_back(*id);
                     }
                 }
-                _ => {}
             }
+
+            if visited.len() != topology.len() {
+                println!("v {}, t{}",visited.len(), topology.len());
+                *warn_text = Text::from(format!("No network partitoning allowed"));
+                return;
+            }
+
         }
     }
-    
+
 
     crash(&mut simulation_controller, id_to_remove, connected_to_removed);
 
