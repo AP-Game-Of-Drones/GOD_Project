@@ -304,7 +304,6 @@ pub fn crash_target(
 
             stack.push_back(id);
 
-            println!("id {}",id);
             while let Some(current) = stack.pop_front() {
                 if visited.insert(current) {
                     for id in topology.get(&current).unwrap() {
@@ -314,7 +313,6 @@ pub fn crash_target(
             }
 
             if visited.len() != topology.len() {
-                println!("v {}, t{}",visited.len(), topology.len());
                 *warn_text = Text::from(format!("No network partitoning allowed"));
                 return;
             }
