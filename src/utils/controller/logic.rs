@@ -140,75 +140,41 @@ pub fn spawn(simulation_controller: &mut SimulationController, val: usize, id: u
                 drone.run();
             }
             _ => {
-                info!("Error modulo");
+                warn!("Error modulo");
             }
         }
     }));
 }
 
 pub fn crash(simulation_controller: &mut SimulationController, id: u8, neighbours: Vec<u8>) {
-    let mut i = 0;
-    for neighbor in neighbours.clone() {
-        match remove_sender(simulation_controller, neighbor, id){
-            Ok(_)=>{
-                info!("Sent remove to all neighbors");
-                i+=1;
-            },
-            Err(_) => {
-                info!("Error")
-            }
-        };
-    }
-    if i==neighbours.len() {
-        match simulation_controller
+    match simulation_controller
         .sender_drone_command
         .get(&id)
         .unwrap()
         .send(DroneCommand::Crash)
-        {
-            Ok(_)=>{
-                simulation_controller.sender_drone_command.remove(&id);
-                info!("Sent crash to {}", id);
-            },
-            Err(_)=>{
-                info!("Error in sender crash to {}", id);
+    {
+        Ok(_) => {
+            info!("Sent crash to {}", id);
+            for neighbour in neighbours {
+                remove_sender(simulation_controller, neighbour, id);
             }
-
+            simulation_controller.sender_node_packet.remove(&id);
+            //simulation_controller.sender_drone_command.remove(&id); //NNP panics if this is on
+        }
+        Err(_) => {
+            warn!("crash to {} error", id);
         }
     }
 }
 
-// pub fn crash(simulation_controller: &mut SimulationController, id: u8, neighbours: Vec<u8>) {
-//     match simulation_controller
-//         .sender_drone_command
-//         .get(&id)
-//         .unwrap()
-//         .send(DroneCommand::Crash)
-//     {
-//         Ok(_) => {
-//             //thread::sleep(std::time::Duration::from_millis(1000)); //getdroned doesn't crash if sender is removed fast
-//             simulation_controller.sender_drone_command.remove(&id);
-//             info!("Sent crash to {}", id);
-//             for neighbour in neighbours {
-//                 remove_sender(simulation_controller, neighbour, id);
-//             }
-//         }
-//         Err(_) => {
-//             warn!("crash to {} error", id);
-//         }
-//     }
-// }
-
-pub fn remove_sender(simulation_controller: &mut SimulationController, id: u8, removed_id: u8)-> Result<(),()> {
+pub fn remove_sender(simulation_controller: &mut SimulationController, id: u8, removed_id: u8) {
     if let Some(drone) = simulation_controller.sender_drone_command.get(&id) {
         match drone.send(DroneCommand::RemoveSender(removed_id)) {
             Ok(_) => {
                 info!("Sent remove_sender to drone {}", id);
-                return Ok(());
             }
             Err(_) => {
                 warn!("remove_sender to drone {} error", id);
-                return Err(());
             }
         }
     }
@@ -216,15 +182,12 @@ pub fn remove_sender(simulation_controller: &mut SimulationController, id: u8, r
         match client_server.send(NodeCommand::RemoveSender(removed_id)) {
             Ok(_) => {
                 info!("Sent remove_sender to client or server {}", id);
-                return Ok(());
             }
             Err(_) => {
                 warn!("remove_sender to client or server {} error", id);
-                return Err(());
             }
         }
     }
-    return Ok(());
 }
 
 pub fn add_sender(simulation_controller: &mut SimulationController, id: u8, receiver_id: u8) {

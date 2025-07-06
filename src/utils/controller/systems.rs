@@ -605,6 +605,7 @@ pub fn button_action(
 
         match label {
             Some(ButtonLabel::Add) => {
+                *warn_text = Text::from("");
                 *active_mode = ActiveMode::Add;
                 *drone_add_visibility = Visibility::Visible;
                 *textbox_visibility = Visibility::Visible;
@@ -624,6 +625,7 @@ pub fn button_action(
                 }
             }
             Some(ButtonLabel::Crash) => {
+                *warn_text = Text::from("");
                 *active_mode = ActiveMode::Crash;
                 *drone_add_visibility = Visibility::Hidden;
                 *textbox_visibility = Visibility::Hidden;
@@ -642,6 +644,7 @@ pub fn button_action(
                 }
             }
             Some(ButtonLabel::Connect) => {
+                *warn_text = Text::from("");
                 *active_mode = ActiveMode::Connect;
                 *drone_add_visibility = Visibility::Hidden;
                 *textbox_visibility = Visibility::Hidden;
@@ -660,6 +663,7 @@ pub fn button_action(
                 }
             }
             Some(ButtonLabel::Pdr) => {
+                *warn_text = Text::from("");
                 *active_mode = ActiveMode::Pdr;
                 *drone_add_visibility = Visibility::Hidden;
                 *textbox_visibility = Visibility::Visible;
