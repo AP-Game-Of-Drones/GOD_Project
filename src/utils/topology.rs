@@ -165,7 +165,6 @@ impl Topology {
 
             self.current_path = best_path.clone();
 
-            info!("Best path selected: {:?}", best_path);
         } else {
             println!("⚠️ No paths available to select for dst: {:?}", dst);
         }
@@ -177,7 +176,6 @@ impl Topology {
     }
 
     pub fn increment_weights_for_node(&mut self, node_id: NodeId) {
-        info!("\n\nNODE ID THAT GENERATED NACK: {}\n\n", node_id);
         
         if let Some((current_path, weight)) = &mut self.current_path {
             if current_path.contains(&node_id) {
@@ -195,7 +193,6 @@ impl Topology {
     }
 
     pub fn decrease_weights_for_node(&mut self, node_id: NodeId) {
-        info!("\n\nNODE ID THAT GENERATED NACK: {}\n\n", node_id);
 
         if let Some((current_path, weight)) = &mut self.current_path {
             if current_path.contains(&node_id) {

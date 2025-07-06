@@ -492,17 +492,14 @@ impl ChatClient {
                         .ok();
                     return Ok(());
                 } else {
-                    info!("Error in Sender");
                     self.client_topology.remove_node(trace[1]);
                     return Err("Error in sender");
                 }
             } else {
-                info!("Sender not found");
                 self.client_topology.remove_node(trace[1]);
                 return Err("Sender not found");
             }
         } else {
-            info!("No current path");
             return Err("No current path");
         }
     }
