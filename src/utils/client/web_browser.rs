@@ -5,6 +5,7 @@ use super::super::controller::*;
 use super::super::fragmentation_handling::DefaultsRequest;
 use super::super::fragmentation_handling::*;
 use super::super::topology::*;
+use bevy::log::info;
 use crossbeam_channel::*;
 use rand::rngs::OsRng;
 use rand::*;
@@ -90,7 +91,7 @@ impl WebBrowser {
         match packet.clone().pack_type {
             PacketType::Ack(ack) => {
                 // println!("REC ACK IN CHATCLIENT[{}]", self.id);
-                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index)
+                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index,packet.clone().routing_header.hops.to_vec())
                 {
                     Ok(_) => {
                         // println!("Handled Ack");
@@ -325,8 +326,14 @@ impl WebBrowser {
                                 self.packet_send.insert(id, sender);
                             },
                             NodeCommand::RemoveSender(id)=>{
-                                self.packet_send.remove(&id);
-                                self.client_topology.remove_node(id);
+                                info!("\n\n\nRemove sender to: {}\n\n\n",id);
+                                if let Some(sender) =self.packet_send.get(&id) {
+                                    if sender.is_empty() {
+                                        let _ = self.packet_send.remove(&id);
+                                        self.client_topology.remove_node(id);
+                                        std::thread::sleep(Duration::from_millis(1000));
+                                    }
+                                }
                             }
                         }
                     }
@@ -444,7 +451,7 @@ impl WebBrowser {
         self.client_topology.find_all_paths(self.id, *server_id);
         self.client_topology.set_path_based_on_dst(*server_id);
         let traces = self.client_topology.get_current_path();
-        if let Some(trace) = traces {
+        if let Some((trace,_)) = traces {
             let packet = Packet::new_ack(
                 SourceRoutingHeader::with_first_hop(trace.clone()),
                 session_id,
@@ -473,10 +480,9 @@ impl WebBrowser {
         session_id: u64,
         fragment: Fragment,
     ) -> Result<(), &str> {
-        self.client_topology.find_all_paths(self.id, server_id);
         self.client_topology.set_path_based_on_dst(server_id);
         let traces = self.client_topology.get_current_path();
-        if let Some(trace) = traces {
+        if let Some((trace,_)) = traces {
             let packet = Packet::new_fragment(
                 SourceRoutingHeader::with_first_hop(trace.clone()),
                 session_id,
@@ -492,6 +498,7 @@ impl WebBrowser {
                     return Err("Error in sender");
                 }
             } else {
+                self.client_topology.remove_node(trace[1]);
                 return Err("Sender not found");
             }
         } else {
@@ -567,7 +574,7 @@ impl WebBrowser {
         return self.send_flood_response(&mut new_packet);
     }
 
-    fn recv_nack_n_handle(
+   fn recv_nack_n_handle(
         &mut self,
         session_id: u64,
         nack: Nack,
@@ -588,19 +595,29 @@ impl WebBrowser {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(10));
+                                    }
                                     return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -609,7 +626,7 @@ impl WebBrowser {
                                 }
                             }
                             _ => {
-                                return Err("Packet should have not produced a nack");
+                                return Err("Packet shouldn't have produced a nack");
                             }
                         }
                     }
@@ -629,12 +646,22 @@ impl WebBrowser {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            std::thread::sleep(Duration::from_millis(10));
+                                        }
+                                    }
                                     return Ok(());
                                 }
                             }
@@ -649,21 +676,31 @@ impl WebBrowser {
             }
             NackType::ErrorInRouting(id) => {
                 // println!("Error in routing nacked");
+                //Could be a drone in crash mode so remove the node id from topology and update it
+                self.client_topology.remove_node(id);
 
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
-                    //Could be a drone in crash mode so remove the node id from topology and update it
-                    self.client_topology.remove_node(id);
                     //update the path since it might mean a drone has crashed or bad routing
-                    self.client_topology.increment_weights_for_node(id);
+                    // self.client_topology.increment_weights_for_node(id);
                     for p in packets.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(10));
+                                    }
                                     return Ok(());
                                 }
                             }
@@ -694,18 +731,28 @@ impl WebBrowser {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    self.client_topology.increment_weights_for_node(id);
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                    // self.client_topology.increment_weights_for_node(id);
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(10));
+                                    }
                                     return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
-                                    self.client_topology.increment_weights_for_node(id);
+                                    // self.client_topology.increment_weights_for_node(id);
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -726,9 +773,9 @@ impl WebBrowser {
         return Err("No match found for session_id and fragment_index");
     }
 
-    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
-        if let Some(holder) = { self.holder_sent.get(&(session_id, self.id)) } {
-            if holder.is_empty() && fragment_index == 0 {
+    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64, hops: Vec<u8>) -> Result<(), &str> {
+        if let Some(holder) = { self.holder_sent.get_mut(&(session_id, self.id)) } {
+            if holder.is_empty(){
                 return Err("All fragments of corrisponding message have been received");
             } else if holder.is_empty() && fragment_index != 0 {
                 return Err("Not supposed to receive this ACK");
@@ -745,6 +792,9 @@ impl WebBrowser {
                         _ => {}
                     }
                 }
+                let mut vec = hops.clone();
+                vec.reverse();
+                self.client_topology.decrease_weight_for_path(vec);
 
                 self.holder_sent
                     .get_mut(&(session_id, self.id))
@@ -835,7 +885,11 @@ impl WebBrowser {
     fn get_hops(&mut self, dst: u8) -> Option<Vec<u8>> {
         self.client_topology.find_all_paths(self.id, dst);
         self.client_topology.set_path_based_on_dst(dst);
-        self.client_topology.get_current_path()
+        if let Some(hops) = self.client_topology.get_current_path(){
+            Some(hops.0.clone())
+        } else {
+            None
+        }
     }
 }
 

@@ -72,13 +72,35 @@ fn helper3(config: &Config) -> u8 {
         if s_len == 1 {
             res = CHATAPP;
         } else if s_len > 1 {
-            res = val % 2;
+            println!("Choose:\n\t1 for ChatApp\n\t2 for WebApp ");
+            std::io::stdout().flush().unwrap();
+            let mut str =  String::new();
+            std::io::stdin().read_line(&mut str).ok();
+            match str.trim().parse::<u8>(){
+                Ok(n)=>{
+                    res = n;
+                }, 
+                Err(_)=>{
+                    res = val % 2;
+                }
+            }
         }
     } else if c_len > 3 {
         if s_len <= 1 {
             res = CHATAPP
         } else if s_len >= 2 {
-            res = val % 2;
+            println!("Choose:\n\t1 for ChatApp\n\t2 for WebApp ");
+            std::io::stdout().flush().unwrap();
+            let mut str =  String::new();
+            std::io::stdin().read_line(&mut str).ok();
+            match str.trim().parse::<u8>(){
+                Ok(n)=>{
+                    res = n;
+                }, 
+                Err(_)=>{
+                    res = val % 2;
+                }
+            }
         }
     }
     res
@@ -409,8 +431,9 @@ pub fn initialize(
     let (cs_send, cs_recv) = unbounded::<NodeEvent>();
 
     let mut packet_channels = HashMap::new();
+    //create channels for every node
     for drone in config.drone.iter() {
-        packet_channels.insert(drone.id, unbounded());
+        packet_channels.insert(drone.id, unbounded()); 
     }
     for client in config.client.iter() {
         packet_channels.insert(client.id, unbounded());
@@ -422,23 +445,50 @@ pub fn initialize(
     let senders = packet_channels
         .clone()
         .into_iter()
-        .map(|(id, (s, _r))| (id, s))
+        .map(|(id, (s, _r))| (id, s.clone()))
         .collect::<HashMap<u8, Sender<Packet>>>();
 
     let mut handles = Vec::new();
 
     let mut counters = [0; 10];
     let len = config.drone.len();
-    println!("{}", len);
-    let mut val=0;
-    let mut range = rand::thread_rng();
+    let mut str = String::new();
+    let mut val = 10;
     if the_one {
-        val = range.r#gen::<usize>() % 10;
+        println!("Choose for one implementation only:\n
+                 \t-0: BagelBomber
+                 \t-1: BetterCallDrone
+                 \t-2: RustRoveri
+                 \t-3: GetDroned
+                 \t-4: C++Enjoyers
+                 \t-5: D.R.O.N.E
+                 \t-6: NNP
+                 \t-7: Rustafarian
+                 \t-8: DrOnes
+                 \t-9: Rusteze\n
+        ");
+        loop {
+            std::io::stdout().flush().unwrap();
+            std::io::stdin().read_line(&mut str).unwrap();
+            match str.trim().parse::<usize>(){
+                Ok(n)=>{
+                    if n<=9 {
+                        val=n;
+                        break;
+                    } else{
+                        println!("Choose a number between 0 and 9");
+                    }
+                },
+                Err(_)=>{
+                    println!("Enter a valid input");
+                }
+            }
+        }
     }
     for drone in config.clone().drone.into_iter() {
         // controller
         let (controller_drone_send, controller_drone_recv) = unbounded();
-        controller_drones.insert(drone.id, controller_drone_send);
+        controller_drones.insert(drone.id, controller_drone_send.clone());
         let drone_event_send = drone_event_send.clone();
         // packet
         let packet_recv = packet_channels[&drone.id].1.clone();
@@ -475,7 +525,7 @@ pub fn initialize(
         // controller
         let (controller_node_send, controller_node_recv) = unbounded::<NodeCommand>();
 
-        cs_controller.insert(drone.id, controller_node_send);
+        cs_controller.insert(drone.id, controller_node_send.clone());
         let cs_send = cs_send.clone();
         // packet
         let packet_recv = packet_channels[&drone.id].1.clone();
@@ -509,7 +559,7 @@ pub fn initialize(
     for drone in config.server.clone().into_iter() {
         // controller
         let (controller_drone_send, controller_drone_recv) = unbounded();
-        cs_controller.insert(drone.id, controller_drone_send);
+        cs_controller.insert(drone.id, controller_drone_send.clone());
         let cs_send = cs_send.clone();
         // packet
         let packet_recv = packet_channels[&drone.id].1.clone();
@@ -535,7 +585,7 @@ pub fn initialize(
         cs_controller,
         drone_event_recv,
         cs_recv,
-        drone_event_send.clone(),
+        drone_event_send,
         senders,
     );
     Ok((handles, gui_chat, gui_web, controller, config.clone()))

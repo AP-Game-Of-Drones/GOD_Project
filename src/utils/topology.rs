@@ -87,7 +87,7 @@ impl Topology {
         let mut current_path = Vec::new();
         let mut all_paths = Vec::new();
 
-        self.dfs(src, dst, &mut visited, &mut current_path, &mut all_paths);
+        self.dfs(src, dst, &mut visited, &mut current_path, &mut all_paths, src);
 
         if all_paths.is_empty() {
             println!("⚠️ Warning: No paths found from {:?} to {:?}", src, dst);
@@ -121,6 +121,7 @@ impl Topology {
         visited: &mut HashSet<NodeId>,
         current_path: &mut Vec<NodeId>,
         all_paths: &mut Vec<Vec<NodeId>>,
+        src: NodeId,
     ) {
         if !visited.insert(current) {
             return;
@@ -130,9 +131,14 @@ impl Topology {
         if current == dst {
             all_paths.push(current_path.clone());
         } else if let Some(node) = self.nodes.get(&current) {
-            for &(neighbor_id, _) in &node.adjacents {
+            for &(neighbor_id, nt) in &node.adjacents {
                 if !visited.contains(&neighbor_id) {
-                    self.dfs(neighbor_id, dst, visited, current_path, all_paths);
+                    if nt != NodeType::Drone && dst==neighbor_id {
+                        self.dfs(neighbor_id, dst, visited, current_path, all_paths,src);
+                    } 
+                    if let NodeType::Drone = nt{
+                        self.dfs(neighbor_id, dst, visited, current_path, all_paths,src);
+                    }
                 }
             }
         }
@@ -159,28 +165,35 @@ impl Topology {
 
             self.current_path = best_path.clone();
 
-            // println!("Best path selected: {:?}", best_path);
+            info!("Best path selected: {:?}", best_path);
         } else {
             println!("⚠️ No paths available to select for dst: {:?}", dst);
         }
     }
 
-    pub fn get_current_path(&self) -> Option<Vec<NodeId>> {
-        self.current_path.as_ref().map(|(path, _)| path.clone())
+    pub fn get_current_path(&self) -> Option<(Vec<NodeId>,u64)> {
+        info!("Current Path {:?}\n{:?}",self.current_path.clone(),self.paths);
+        self.current_path.clone()
     }
 
-    pub fn increment_weights_for_node(&mut self, node_id: NodeId) {
-        info!("\n\nNODE ID THAT GENERATED NACK: {}\n\n",node_id);
-        if let Some((current_path, weight)) = &mut self.current_path {
-            if current_path.contains(&node_id) {
-                *weight += 1;
-            }
-        }
+    pub fn increment_weights_for_path(&mut self, path: Vec<u8>) {
+        info!("\n\nPath THAT GENERATED NACK: {:?}\n\n", path.clone());
 
         if let Some(paths) = &mut self.paths {
-            for path in paths.iter_mut() {
-                if path.0.contains(&node_id) {
-                    path.1 += 1;
+            for (p, weight) in paths.iter_mut() {
+                if *p == path {
+                    *weight += 1;
+                }
+            }
+        }
+    }
+
+    pub fn decrease_weight_for_path(&mut self, path: Vec<u8>) {
+
+        if let Some(paths) = &mut self.paths {
+            for (p, weight) in paths.iter_mut() {
+                if *p == path && *weight>0 {
+                    *weight -= 1;
                 }
             }
         }
@@ -327,26 +340,26 @@ mod tests {
         assert_eq!(current_path.1, 2); // Weight should be the length of the path
     }
 
-    #[test]
-    fn test_increment_weights_for_node() {
-        let mut topology = Topology::new();
+    // #[test]
+    // fn test_increment_weights_for_node() {
+    //     let mut topology = Topology::new();
 
-        // Setup nodes and adjacencies
-        let mut node1 = Node::new(1, NodeType::Drone);
-        let mut node2 = Node::new(2, NodeType::Drone);
-        node1.add_adjacents(2, NodeType::Drone);
-        node2.add_adjacents(1, NodeType::Drone);
-        topology.add_node(node1);
-        topology.add_node(node2);
+    //     // Setup nodes and adjacencies
+    //     let mut node1 = Node::new(1, NodeType::Drone);
+    //     let mut node2 = Node::new(2, NodeType::Drone);
+    //     node1.add_adjacents(2, NodeType::Drone);
+    //     node2.add_adjacents(1, NodeType::Drone);
+    //     topology.add_node(node1);
+    //     topology.add_node(node2);
 
-        topology.find_all_paths(1, 2);
+    //     topology.find_all_paths(1, 2);
 
-        // Increment weight for a node in the path
-        topology.increment_weights_for_node(1);
+    //     // Increment weight for a node in the path
+    //     topology.increment_weights_for_node(1);
 
-        let current_path = topology.current_path.as_ref().unwrap();
-        assert_eq!(current_path.1, 3); // Weight should have increased by 1
-    }
+    //     let current_path = topology.current_path.as_ref().unwrap();
+    //     assert_eq!(current_path.1, 3); // Weight should have increased by 1
+    // }
 
     #[test]
     fn test_get_neighbors() {

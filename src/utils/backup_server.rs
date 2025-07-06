@@ -370,7 +370,7 @@ impl Server {
         match packet.clone().pack_type {
             PacketType::Ack(ack) => {
                 // println!("REC ACK IN CHATCLIENT[{}]", self.id);
-                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index)
+                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index,packet.clone().routing_header.hops.to_vec())
                 {
                     Ok(_) => {
                         // println!("Handled Ack");
@@ -406,7 +406,7 @@ impl Server {
                 // println!("REC FLOODRESPONSE IN CHATCLIENT[{}]", self.id);
                 match self.recv_flood_response_n_handle(f_response) {
                     Ok(_) => {
-                        // println!("Client Topology [{}] : {:?}\n\n",self.id , self.client_topology);
+                        // println!("Client Topology [{}] : {:?}\n\n",self.id , self.server_topology);
                         // println!("Handled FloodResp in CL\n");
                     }
                     Err(e) => {
@@ -452,8 +452,14 @@ impl Server {
                                 self.packet_send.insert(id, sender);
                             },
                             NodeCommand::RemoveSender(id)=>{
-                                self.packet_send.remove(&id);
-                                self.server_topology.remove_node(id);
+                                info!("\n\n\nRemove sender to: {}\n\n\n",id);
+                                if let Some(sender) =self.packet_send.get(&id) {
+                                    if sender.is_empty() {
+                                        let _ = self.packet_send.remove(&id);
+                                        self.server_topology.remove_node(id);
+                                        std::thread::sleep(Duration::from_millis(1000));
+                                    }
+                                }
                             }
                         }
                     }
@@ -533,7 +539,7 @@ impl Server {
         self.server_topology.find_all_paths(self.id, *dst);
         self.server_topology.set_path_based_on_dst(*dst);
         let traces = self.server_topology.get_current_path();
-        if let Some(trace) = traces {
+        if let Some((trace,_)) = traces {
             let packet = Packet::new_ack(
                 SourceRoutingHeader::with_first_hop(trace.clone()),
                 session_id,
@@ -562,10 +568,10 @@ impl Server {
         session_id: u64,
         fragment: Fragment,
     ) -> Result<(), &str> {
-        self.server_topology.find_all_paths(self.id, server_id);
         self.server_topology.set_path_based_on_dst(server_id);
         let traces = self.server_topology.get_current_path();
-        if let Some(trace) = traces {
+        
+        if let Some((trace,_)) = traces {
             let packet = Packet::new_fragment(
                 SourceRoutingHeader::with_first_hop(trace.clone()),
                 session_id,
@@ -578,12 +584,16 @@ impl Server {
                         .ok();
                     return Ok(());
                 } else {
+                    // info!("Error in Sender");
                     return Err("Error in sender");
                 }
             } else {
+                // info!("Sender not found");
+                self.server_topology.remove_node(trace[1]);
                 return Err("Sender not found");
             }
         } else {
+            // info!("No current path");
             return Err("No current path");
         }
     }
@@ -691,29 +701,39 @@ impl Server {
         while self.session_id_already_used(session) {
             session = rand_session_id();
         }
-        self.send_new_flood_request(session, flood_id).ok();
         match nack.clone().nack_type {
             NackType::DestinationIsDrone => {
                 //check route, it shouldn't happen if the routing was done right
-
+                // println!("Dest is drone nacked");
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
                     for p in packets.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.server_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    return self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    );
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                    loop {
+                                        self.server_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(10));
+                                    }
+                                    return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
                                     self.server_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -722,7 +742,7 @@ impl Server {
                                 }
                             }
                             _ => {
-                                return Err("Packet should have not produced a nack");
+                                return Err("Packet shouldn't have produced a nack");
                             }
                         }
                     }
@@ -731,23 +751,34 @@ impl Server {
                 }
             }
             NackType::Dropped => {
+                self.send_new_flood_request(session, flood_id).ok();
+
                 //update weight of the path used and change it there's one with less
+                // println!("Dropped by drone nacked");
+
                 if let Some(fr) = { self.holder_sent.get(&(session_id, self.id)) } {
                     for p in fr.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    info!(
-                                        "FragmentIndex {} == NackIndex{}: Dropped-> Resend",
-                                        f.fragment_index, nack.fragment_index
-                                    );
                                     self.server_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    return self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    );
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                    loop {
+                                        self.server_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            std::thread::sleep(Duration::from_millis(10));
+                                        }
+                                    }
+                                    return Ok(());
                                 }
                             }
                             _ => {
@@ -760,20 +791,33 @@ impl Server {
                 }
             }
             NackType::ErrorInRouting(id) => {
+                // println!("Error in routing nacked");
+                //Could be a drone in crash mode so remove the node id from topology and update it
+                self.server_topology.remove_node(id);
+
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
-                    //Could be a drone in crash mode so remove the node id from topology and update it
-                    self.server_topology.remove_node(id);
                     //update the path since it might mean a drone has crashed or bad routing
-                    self.server_topology.increment_weights_for_node(id);
+                    // self.server_topology.increment_weights_for_node(id);
                     for p in packets.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    return self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    );
+                                    loop {
+                                        self.server_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(10));
+                                    }
+                                    return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
@@ -796,24 +840,35 @@ impl Server {
             }
             NackType::UnexpectedRecipient(id) => {
                 //shouldn't happen, if it happens update paths and update topology
-                if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)) } {
-                    info!("Received Nack for session {}: Line->700", session_id);
+                // println!("Unexpected rec nacked");
 
+                if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)) } {
                     for p in packets.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    self.server_topology.increment_weights_for_node(id);
-                                    return self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    );
+                                    // self.server_topology.increment_weights_for_node(id);
+                                    loop {
+                                        self.server_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(10));
+                                    }
+                                    return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
-                                    self.server_topology.increment_weights_for_node(id);
+                                    // self.server_topology.increment_weights_for_node(id);
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -834,9 +889,9 @@ impl Server {
         return Err("No match found for session_id and fragment_index");
     }
 
-    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
-        if let Some(holder) = { self.holder_sent.get(&(session_id, self.id)) } {
-            if holder.is_empty() && fragment_index == 0 {
+    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64, hops: Vec<u8>) -> Result<(), &str> {
+        if let Some(holder) = { self.holder_sent.get_mut(&(session_id, self.id)) } {
+            if holder.is_empty(){
                 return Err("All fragments of corrisponding message have been received");
             } else if holder.is_empty() && fragment_index != 0 {
                 return Err("Not supposed to receive this ACK");
@@ -853,6 +908,9 @@ impl Server {
                         _ => {}
                     }
                 }
+                let mut vec= hops.clone();
+                vec.reverse();
+                self.server_topology.decrease_weight_for_path(vec);
 
                 self.holder_sent
                     .get_mut(&(session_id, self.id))
@@ -866,6 +924,7 @@ impl Server {
             return Err("No matching key found for Ack");
         }
     }
+
 
     fn recv_frag_n_handle(
         &mut self,
@@ -941,7 +1000,11 @@ impl Server {
     fn get_hops(&mut self, dst: u8) -> Option<Vec<u8>> {
         self.server_topology.find_all_paths(self.id, dst);
         self.server_topology.set_path_based_on_dst(dst);
-        self.server_topology.get_current_path()
+        if let Some(hops) = self.server_topology.get_current_path(){
+            Some(hops.0.clone())
+        } else {
+            None
+        }
     }
 }
 

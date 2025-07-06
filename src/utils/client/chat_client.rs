@@ -3,11 +3,13 @@ use super::super::super::frontend::ChatEvent;
 use super::super::controller::*;
 use super::super::fragmentation_handling::DefaultsRequest;
 use super::super::fragmentation_handling::*;
+use bevy::log::info;
 use crossbeam_channel::*;
 use rand::RngCore;
 use rand::rngs::OsRng;
 
 use super::super::topology::*;
+use std::thread;
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
@@ -244,7 +246,7 @@ impl ChatClient {
         match packet.clone().pack_type {
             PacketType::Ack(ack) => {
                 // println!("REC ACK IN CHATCLIENT[{}]", self.id);
-                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index)
+                match self.recv_ack_n_handle(packet.clone().session_id, ack.clone().fragment_index,packet.clone().routing_header.hops.to_vec())
                 {
                     Ok(_) => {
                         // println!("Handled Ack");
@@ -316,22 +318,29 @@ impl ChatClient {
     pub fn handle_channels(&mut self) {
         loop {
             select! {
-                recv(self.packet_recv) -> packet_res => {
-                    if let Ok(packet) = packet_res {
-                        self.handle_packet(packet.clone());
-                    }
-                },
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
                             NodeCommand::AddSender(id,sender)=>{
+                                info!("\n\n\nAdd sender to: {}\n\n\n",id);
                                 self.packet_send.insert(id, sender);
                             },
                             NodeCommand::RemoveSender(id)=>{
-                                self.packet_send.remove(&id);
-                                self.client_topology.remove_node(id);
+                                info!("\n\n\nRemove sender to: {}\n\n\n",id);
+                                if let Some(sender) =self.packet_send.get(&id) {
+                                    if sender.is_empty() {
+                                        let _ = self.packet_send.remove(&id);
+                                        self.client_topology.remove_node(id);
+                                        thread::sleep(Duration::from_millis(1000));
+                                    }
+                                }
                             }
                         }
+                    }
+                },
+                recv(self.packet_recv) -> packet_res => {
+                    if let Ok(packet) = packet_res {
+                        self.handle_packet(packet.clone());
                     }
                 },
                 recv(self.gui_command_receiver) -> gui_command => {
@@ -436,7 +445,7 @@ impl ChatClient {
         self.client_topology.find_all_paths(self.id, *server_id);
         self.client_topology.set_path_based_on_dst(*server_id);
         let traces = self.client_topology.get_current_path();
-        if let Some(trace) = traces {
+        if let Some((trace,_)) = traces {
             let packet = Packet::new_ack(
                 SourceRoutingHeader::with_first_hop(trace.clone()),
                 session_id,
@@ -465,10 +474,11 @@ impl ChatClient {
         session_id: u64,
         fragment: Fragment,
     ) -> Result<(), &str> {
-        self.client_topology.find_all_paths(self.id, server_id);
         self.client_topology.set_path_based_on_dst(server_id);
         let traces = self.client_topology.get_current_path();
-        if let Some(trace) = traces {
+        
+        info!("Path chosen to send to {:?}",traces.clone());
+        if let Some((trace,_)) = traces {
             let packet = Packet::new_fragment(
                 SourceRoutingHeader::with_first_hop(trace.clone()),
                 session_id,
@@ -481,12 +491,16 @@ impl ChatClient {
                         .ok();
                     return Ok(());
                 } else {
+                    info!("Error in Sender");
                     return Err("Error in sender");
                 }
             } else {
+                info!("Sender not found");
+                self.client_topology.remove_node(trace[1]);
                 return Err("Sender not found");
             }
         } else {
+            info!("No current path");
             return Err("No current path");
         }
     }
@@ -508,6 +522,7 @@ impl ChatClient {
                 Err(_) => Err("Something wrong with the sender"),
             }
         } else {
+            info!("{:?}",self.client_topology);
             Err("First hop is wrong")
         }
     }
@@ -581,19 +596,29 @@ impl ChatClient {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(100));
+                                    }
                                     return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -622,12 +647,22 @@ impl ChatClient {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_node(packet.routing_header.hops[0]);
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            std::thread::sleep(Duration::from_millis(100));
+                                        }
+                                    }
                                     return Ok(());
                                 }
                             }
@@ -647,16 +682,26 @@ impl ChatClient {
 
                 if let Some(packets) = { self.holder_sent.get(&(session_id, self.id)).cloned() } {
                     //update the path since it might mean a drone has crashed or bad routing
-                    self.client_topology.increment_weights_for_node(id);
+                    // self.client_topology.increment_weights_for_node(id);
                     for p in packets.clone() {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+                                                                        
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(100));
+                                    }
                                     return Ok(());
                                 }
                             }
@@ -687,18 +732,28 @@ impl ChatClient {
                         match p.clone().pack_type {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
-                                    self.client_topology.increment_weights_for_node(id);
-                                    while self.send_new_generic_fragment(
-                                        *p.routing_header.hops.last().unwrap(),
-                                        session_id,
-                                        f.clone(),
-                                    ).is_err(){};
+                                    // self.client_topology.increment_weights_for_node(id);
+                                    loop {
+                                        self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
+
+                                        if self.send_new_generic_fragment(
+                                            *p.routing_header.hops.last().unwrap(),
+                                            session_id,
+                                            f.clone(),
+                                        ).is_ok() {
+                                            break;
+                                        } else {
+                                            // Optionally: increase weights for the failed path to avoid it
+                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        }
+                                        std::thread::sleep(Duration::from_millis(100));
+                                    }
                                     return Ok(());
                                 }
                             }
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
-                                    self.client_topology.increment_weights_for_node(id);
+                                    // self.client_topology.increment_weights_for_node(id);
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -719,7 +774,7 @@ impl ChatClient {
         return Err("No match found for session_id and fragment_index");
     }
 
-    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64) -> Result<(), &str> {
+    fn recv_ack_n_handle(&mut self, session_id: u64, fragment_index: u64, hops: Vec<u8>) -> Result<(), &str> {
         if let Some(holder) = { self.holder_sent.get_mut(&(session_id, self.id)) } {
             if holder.is_empty(){
                 return Err("All fragments of corrisponding message have been received");
@@ -738,6 +793,9 @@ impl ChatClient {
                         _ => {}
                     }
                 }
+                let mut vec= hops.clone();
+                vec.reverse();
+                self.client_topology.decrease_weight_for_path(vec);
 
                 self.holder_sent
                     .get_mut(&(session_id, self.id))
@@ -760,7 +818,7 @@ impl ChatClient {
     ) -> Option<Message> {
         self.client_topology.find_all_paths(self.id, src);
         self.client_topology.set_path_based_on_dst(src);
-        self.send_ack(session_id, &src, frag.fragment_index).ok();
+        while self.send_ack(session_id, &src, frag.fragment_index).is_err(){};
         if let Some(holder) = self.holder_frag_index.get_mut(&(session_id, src)) {
             if !holder.contains(&frag.fragment_index) {
                 let target = self.holder_rec.get_mut(&(session_id, src)).unwrap();
@@ -825,7 +883,11 @@ impl ChatClient {
     fn get_hops(&mut self, dst: u8) -> Option<Vec<u8>> {
         self.client_topology.find_all_paths(self.id, dst);
         self.client_topology.set_path_based_on_dst(dst);
-        self.client_topology.get_current_path()
+        if let Some(hops) = self.client_topology.get_current_path(){
+            Some(hops.0.clone())
+        } else {
+            None
+        }
     }
 }
 
