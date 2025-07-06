@@ -185,7 +185,7 @@ impl Topology {
 
         if let Some(paths) = &mut self.paths {
             for (_, weight) in paths.iter_mut() {
-                if *weight < 10000 { // upper bound for a path to not increase anymore
+                if *weight < 100000 { // upper bound for a path to not increase anymore
                     *weight += 1;
                 }
             }
