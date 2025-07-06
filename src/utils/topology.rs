@@ -176,28 +176,45 @@ impl Topology {
         self.current_path.clone()
     }
 
-    pub fn increment_weights_for_path(&mut self, path: Vec<u8>) {
-        info!("\n\nPath THAT GENERATED NACK: {:?}\n\n", path.clone());
+    pub fn increment_weights_for_node(&mut self, node_id: NodeId) {
+        info!("\n\nNODE ID THAT GENERATED NACK: {}\n\n", node_id);
+        
+        if let Some((current_path, weight)) = &mut self.current_path {
+            if current_path.contains(&node_id) {
+                *weight += 1;
+            }
+        }
 
         if let Some(paths) = &mut self.paths {
-            for (p, weight) in paths.iter_mut() {
-                if *p == path {
+            for (_, weight) in paths.iter_mut() {
+                if *weight < 10000 { // upper bound for a path to not increase anymore
                     *weight += 1;
                 }
             }
         }
     }
 
-    pub fn decrease_weight_for_path(&mut self, path: Vec<u8>) {
+    pub fn decrease_weights_for_node(&mut self, node_id: NodeId) {
+        info!("\n\nNODE ID THAT GENERATED NACK: {}\n\n", node_id);
+
+        if let Some((current_path, weight)) = &mut self.current_path {
+            if current_path.contains(&node_id) {
+                if *weight > 0 {
+                    *weight -= 1;
+                }
+            }
+        }
 
         if let Some(paths) = &mut self.paths {
-            for (p, weight) in paths.iter_mut() {
-                if *p == path && *weight>0 {
+            for (_, weight) in paths.iter_mut() {
+                if *weight > 0 {
                     *weight -= 1;
                 }
             }
         }
     }
+
+    
 
     fn add_node(&mut self, node: Node) {
         self.nodes.insert(node.value, node);

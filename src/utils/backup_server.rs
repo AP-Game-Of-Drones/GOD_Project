@@ -439,12 +439,7 @@ impl Server {
 
     pub fn handle_channels(&mut self) {
         loop {
-            select! {
-                recv(self.packet_recv) -> packet_res => {
-                    if let Ok(packet) = packet_res {
-                        self.handle_packet(packet.clone());
-                    }
-                },
+            select_biased! {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
@@ -462,6 +457,11 @@ impl Server {
                                 }
                             }
                         }
+                    }
+                },
+                recv(self.packet_recv) -> packet_res => {
+                    if let Ok(packet) = packet_res {
+                        self.handle_packet(packet.clone());
                     }
                 },
                 default(Duration::from_secs(5)) => {
@@ -568,6 +568,7 @@ impl Server {
         session_id: u64,
         fragment: Fragment,
     ) -> Result<(), &str> {
+        self.server_topology.find_all_paths(self.id,server_id);
         self.server_topology.set_path_based_on_dst(server_id);
         let traces = self.server_topology.get_current_path();
         
@@ -585,6 +586,7 @@ impl Server {
                     return Ok(());
                 } else {
                     // info!("Error in Sender");
+                    self.server_topology.remove_node(trace[1]);
                     return Err("Error in sender");
                 }
             } else {
@@ -593,6 +595,7 @@ impl Server {
                 return Err("Sender not found");
             }
         } else {
+            self.server_topology.find_all_paths(self.id,server_id);
             // info!("No current path");
             return Err("No current path");
         }
@@ -711,7 +714,7 @@ impl Server {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.server_topology
-                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        .increment_weights_for_node(p.routing_header.hops[0]);
                                     loop {
                                         self.server_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
                                                                         
@@ -723,7 +726,7 @@ impl Server {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.server_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                         }
                                         std::thread::sleep(Duration::from_millis(10));
                                     }
@@ -733,7 +736,7 @@ impl Server {
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
                                     self.server_topology
-                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        .increment_weights_for_node(p.routing_header.hops[0]);
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -762,7 +765,7 @@ impl Server {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.server_topology
-                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        .increment_weights_for_node(p.routing_header.hops[0]);
                                     loop {
                                         self.server_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
                                                                         
@@ -774,7 +777,7 @@ impl Server {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.server_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                             std::thread::sleep(Duration::from_millis(10));
                                         }
                                     }
@@ -813,7 +816,7 @@ impl Server {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.server_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                         }
                                         std::thread::sleep(Duration::from_millis(10));
                                     }
@@ -859,7 +862,7 @@ impl Server {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.server_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.server_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                         }
                                         std::thread::sleep(Duration::from_millis(10));
                                     }
@@ -909,8 +912,12 @@ impl Server {
                     }
                 }
                 let mut vec= hops.clone();
-                vec.reverse();
-                self.server_topology.decrease_weight_for_path(vec);
+                
+                for node in vec {
+                    if node!=self.id && node!=hops[0]{
+                        self.server_topology.decrease_weights_for_node(node);
+                    }
+                }
 
                 self.holder_sent
                     .get_mut(&(session_id, self.id))

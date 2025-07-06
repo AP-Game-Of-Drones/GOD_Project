@@ -310,12 +310,7 @@ impl WebBrowser {
 
     pub fn handle_channels(&mut self) {
         loop {
-            select! {
-                recv(self.packet_recv) -> packet_res => {
-                    if let Ok(packet) = packet_res {
-                        self.handle_packet(packet.clone());
-                    }
-                },
+            select_biased! {
                 recv(self.controller_recv) -> command_res => {
                     if let Ok(command) = command_res {
                         match command {
@@ -336,6 +331,11 @@ impl WebBrowser {
                                 }
                             }
                         }
+                    }
+                },
+                recv(self.packet_recv) -> packet_res => {
+                    if let Ok(packet) = packet_res {
+                        self.handle_packet(packet.clone());
                     }
                 },
                 recv(self.gui_command_receiver) -> gui_command => {
@@ -480,6 +480,7 @@ impl WebBrowser {
         session_id: u64,
         fragment: Fragment,
     ) -> Result<(), &str> {
+        self.client_topology.find_all_paths(self.id,server_id);
         self.client_topology.set_path_based_on_dst(server_id);
         let traces = self.client_topology.get_current_path();
         if let Some((trace,_)) = traces {
@@ -495,6 +496,7 @@ impl WebBrowser {
                         .ok();
                     return Ok(());
                 } else {
+                    self.client_topology.remove_node(trace[1]);
                     return Err("Error in sender");
                 }
             } else {
@@ -502,6 +504,7 @@ impl WebBrowser {
                 return Err("Sender not found");
             }
         } else {
+            self.client_topology.find_all_paths(self.id,server_id);
             return Err("No current path");
         }
     }
@@ -595,7 +598,7 @@ impl WebBrowser {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        .increment_weights_for_node(p.routing_header.hops[0]);
                                     loop {
                                         self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
                                                                         
@@ -607,7 +610,7 @@ impl WebBrowser {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.client_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                         }
                                         std::thread::sleep(Duration::from_millis(10));
                                     }
@@ -617,7 +620,7 @@ impl WebBrowser {
                             PacketType::Ack(a) => {
                                 if a.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        .increment_weights_for_node(p.routing_header.hops[0]);
                                     return self.send_ack(
                                         session_id,
                                         p.routing_header.hops.last().unwrap(),
@@ -646,7 +649,7 @@ impl WebBrowser {
                             PacketType::MsgFragment(f) => {
                                 if f.fragment_index == nack.fragment_index {
                                     self.client_topology
-                                        .increment_weights_for_path(p.routing_header.hops.to_vec());
+                                        .increment_weights_for_node(p.routing_header.hops[0]);
                                     loop {
                                         self.client_topology.set_path_based_on_dst(*p.routing_header.hops.last().unwrap());
                                                                         
@@ -658,7 +661,7 @@ impl WebBrowser {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.client_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                             std::thread::sleep(Duration::from_millis(10));
                                         }
                                     }
@@ -697,7 +700,7 @@ impl WebBrowser {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.client_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                         }
                                         std::thread::sleep(Duration::from_millis(10));
                                     }
@@ -743,7 +746,7 @@ impl WebBrowser {
                                             break;
                                         } else {
                                             // Optionally: increase weights for the failed path to avoid it
-                                            self.client_topology.increment_weights_for_path(p.routing_header.hops.to_vec());
+                                            self.client_topology.increment_weights_for_node(p.routing_header.hops[0]);
                                         }
                                         std::thread::sleep(Duration::from_millis(10));
                                     }
@@ -793,9 +796,11 @@ impl WebBrowser {
                     }
                 }
                 let mut vec = hops.clone();
-                vec.reverse();
-                self.client_topology.decrease_weight_for_path(vec);
-
+                for node in vec {
+                    if node!=self.id && node!=hops[0]{
+                        self.client_topology.decrease_weights_for_node(node);
+                    }
+                }
                 self.holder_sent
                     .get_mut(&(session_id, self.id))
                     .unwrap()
