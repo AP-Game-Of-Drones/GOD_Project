@@ -72,7 +72,7 @@ fn helper3(config: &Config) -> u8 {
         if s_len == 1 {
             res = CHATAPP;
         } else if s_len > 1 {
-            println!("Choose:\n\t1 for ChatApp\n\t2 for WebApp ");
+            println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
             std::io::stdout().flush().unwrap();
             let mut str =  String::new();
             std::io::stdin().read_line(&mut str).ok();
@@ -89,7 +89,7 @@ fn helper3(config: &Config) -> u8 {
         if s_len <= 1 {
             res = CHATAPP
         } else if s_len >= 2 {
-            println!("Choose:\n\t1 for ChatApp\n\t2 for WebApp ");
+            println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
             std::io::stdout().flush().unwrap();
             let mut str =  String::new();
             std::io::stdin().read_line(&mut str).ok();
