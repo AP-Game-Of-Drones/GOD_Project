@@ -171,7 +171,7 @@ impl Topology {
     }
 
     pub fn get_current_path(&self) -> Option<(Vec<NodeId>,u64)> {
-        info!("Current Path {:?}\n{:?}",self.current_path.clone(),self.paths);
+        // info!("Current Path {:?}\n{:?}",self.current_path.clone(),self.paths);
         self.current_path.clone()
     }
 
@@ -193,17 +193,8 @@ impl Topology {
     }
 
     pub fn decrease_weights_for_node(&mut self, node_id: NodeId) {
-
         if let Some((current_path, weight)) = &mut self.current_path {
             if current_path.contains(&node_id) {
-                if *weight > 0 {
-                    *weight -= 1;
-                }
-            }
-        }
-
-        if let Some(paths) = &mut self.paths {
-            for (_, weight) in paths.iter_mut() {
                 if *weight > 0 {
                     *weight -= 1;
                 }

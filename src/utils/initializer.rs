@@ -63,8 +63,6 @@ fn helper2(counters: &mut [i32]) -> usize {
 fn helper3(config: &Config) -> u8 {
     let s_len = config.server.len();
     let c_len = config.client.len();
-    let mut rng = rand::thread_rng();
-    let val = rng.r#gen::<u8>();
     let mut res = 0;
     if c_len == 1  && s_len>1{
         res = WEBAPP;
@@ -75,13 +73,21 @@ fn helper3(config: &Config) -> u8 {
             println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
             std::io::stdout().flush().unwrap();
             let mut str =  String::new();
+            loop {
             std::io::stdin().read_line(&mut str).ok();
-            match str.trim().parse::<u8>(){
-                Ok(n)=>{
-                    res = n;
-                }, 
-                Err(_)=>{
-                    res = val % 2;
+                match str.trim().parse::<u8>(){
+                    Ok(n)=>{
+                        if n==0 || n==1 {
+                            res = n;
+                            break;
+                        } else {
+                            println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
+                            std::io::stdout().flush().unwrap();
+                        }
+                    }, 
+                    Err(_)=>{
+                        println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
+                    }
                 }
             }
         }
@@ -92,13 +98,21 @@ fn helper3(config: &Config) -> u8 {
             println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
             std::io::stdout().flush().unwrap();
             let mut str =  String::new();
-            std::io::stdin().read_line(&mut str).ok();
-            match str.trim().parse::<u8>(){
-                Ok(n)=>{
-                    res = n;
-                }, 
-                Err(_)=>{
-                    res = val % 2;
+            loop {
+                std::io::stdin().read_line(&mut str).ok();
+                match str.trim().parse::<u8>(){
+                    Ok(n)=>{
+                        if n==0 || n==1 {
+                            res = n;
+                            break;
+                        } else {
+                            println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
+                            std::io::stdout().flush().unwrap();
+                        }
+                    }, 
+                    Err(_)=>{
+                        println!("Choose:\n\t0 for ChatApp\n\t1 for WebApp ");
+                    }
                 }
             }
         }
