@@ -163,7 +163,9 @@ impl Topology {
                 .min_by_key(|(_, weight)| weight)
                 .cloned();
 
+            // info!("\nCurrent Path {:?}\nBest_path: {:?}\n",self.current_path.clone(),best_path.clone());
             self.current_path = best_path.clone();
+            // info!("\nCurrent Path {:?}\nBest_path: {:?}\n",self.current_path.clone(),best_path.clone());
 
         } else {
             println!("⚠️ No paths available to select for dst: {:?}", dst);
@@ -171,12 +173,11 @@ impl Topology {
     }
 
     pub fn get_current_path(&self) -> Option<(Vec<NodeId>,u64)> {
-        // info!("Current Path {:?}\n{:?}",self.current_path.clone(),self.paths);
         self.current_path.clone()
     }
 
     pub fn increment_weights_for_node(&mut self, node_id: NodeId) {
-        
+        info!("Nack produced in {}",node_id);
         if let Some((current_path, weight)) = &mut self.current_path {
             if current_path.contains(&node_id) {
                 *weight += 1;
@@ -184,8 +185,9 @@ impl Topology {
         }
 
         if let Some(paths) = &mut self.paths {
-            for (_, weight) in paths.iter_mut() {
-                if *weight < 100000 { // upper bound for a path to not increase anymore
+            for (p, weight) in paths.iter_mut() {
+                if *weight < 100000 && p.contains(&node_id){ // upper bound for a path to not increase anymore
+                    // info!("Path's weight to increment: {:?}",p.clone());
                     *weight += 1;
                 }
             }
